@@ -5,17 +5,19 @@ import { Button } from "@/components/ui/button"
 import { normalizePhone } from "@/lib/format"
 import { useT } from "@/lib/i18n"
 
-export function SignInScreen({ busy, onSubmit, toast }: { busy: boolean; onSubmit: (input: { phone: string; name: string; consent: boolean }) => void; toast: (message: string) => void }) {
+export function SignInScreen({ busy, onSubmit, toast }: { busy: boolean; onSubmit: (input: { phone: string; name: string; consent: boolean; joinCode?: string }) => void; toast: (message: string) => void }) {
   const t = useT()
   const [phone, setPhone] = useState("")
   const [code, setCode] = useState("")
   const [name, setName] = useState("")
   const [consent, setConsent] = useState(false)
+  const [showCode, setShowCode] = useState(false)
+  const [joinCode, setJoinCode] = useState("")
 
   function submit() {
     if (!normalizePhone(phone)) return toast(t("rider.signin.invalidPhone"))
     if (code.length !== 6) return toast(t("rider.signin.invalidCode"))
-    onSubmit({ phone, name, consent })
+    onSubmit({ phone, name, consent, joinCode: showCode && joinCode.trim() ? joinCode.trim() : undefined })
   }
 
   return (
@@ -54,12 +56,22 @@ export function SignInScreen({ busy, onSubmit, toast }: { busy: boolean; onSubmi
           .
         </span>
       </label>
+      {showCode ? (
+        <div className="mt-4">
+          <label htmlFor="join-code" className="block text-sm font-medium">
+            {t("rider.signin.companyCodeLabel")}
+          </label>
+          <input id="join-code" value={joinCode} onChange={(event) => setJoinCode(event.target.value)} autoCapitalize="characters" placeholder="AKAGERA-24" className="mt-2 min-h-12 w-full rounded-xl border bg-card px-4 uppercase outline-none" />
+          <p className="mt-1 text-xs text-muted-foreground">{t("rider.signin.companyCodeHint")}</p>
+        </div>
+      ) : (
+        <button onClick={() => setShowCode(true)} className="mt-4 min-h-11 w-full text-sm font-medium text-primary">
+          {t("rider.signin.companyCode")}
+        </button>
+      )}
       <Button onClick={submit} disabled={busy} className="mt-5 min-h-14 w-full">
         {t("rider.signin.continue")}
       </Button>
-      <button onClick={() => toast(t("rider.signin.companyCodeHint"))} className="mt-4 min-h-11 w-full text-sm font-medium text-primary">
-        {t("rider.signin.companyCode")}
-      </button>
       <p className="mt-5 text-center text-xs text-muted-foreground">{t("rider.signin.demoNote")}</p>
     </div>
   )

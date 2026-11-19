@@ -19,7 +19,7 @@ export function HomeScreen(props: {
   onOpenTrip: (trip: Trip) => void
   onOpenActive: () => void
   onSeeAll: () => void
-  toast: (message: string) => void
+  onAddPlace: () => void
 }) {
   const t = useT()
   const { rider, recentTrips, activeTrip } = props
@@ -47,7 +47,7 @@ export function HomeScreen(props: {
             <CarFront className="size-5" />
           </span>
           <span className="flex-1">
-            <span className="block text-xs opacity-80">{t("rider.home.activeRide")}</span>
+            <span className="block text-xs opacity-80">{activeTrip.status === "requested" ? t("rider.home.findingRide") : t("rider.home.activeRide")}</span>
             <span className="font-semibold">{t("common.route", { from: placeName(activeTrip.pickup), to: placeName(activeTrip.dropoff) })}</span>
           </span>
           <ArrowRight className="size-5" />
@@ -56,13 +56,18 @@ export function HomeScreen(props: {
       <section className="px-5 pt-7">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{t("rider.home.savedPlaces")}</h2>
-          <button onClick={() => props.toast(t("rider.home.addSavedPlaceHint"))} className="grid size-9 place-items-center rounded-full hover:bg-secondary" aria-label={t("rider.home.addSavedPlace")}>
+          <button onClick={props.onAddPlace} className="grid size-9 place-items-center rounded-full hover:bg-secondary" aria-label={t("rider.home.addSavedPlace")}>
             <Plus className="size-5" />
           </button>
         </div>
-        <div className="flex gap-3">
+        <div className="grid grid-cols-2 gap-3">
+          {rider.savedPlaces.length === 0 && (
+            <button onClick={props.onAddPlace} className="col-span-2 min-h-14 rounded-2xl border border-dashed text-sm text-muted-foreground">
+              {t("rider.home.addSavedPlace")}
+            </button>
+          )}
           {rider.savedPlaces.map((place, i) => (
-            <button key={place.id} onClick={() => props.onSavedPlace(place.placeId)} className="flex flex-1 items-center gap-3 rounded-2xl border bg-card p-3 text-left">
+            <button key={place.id} onClick={() => props.onSavedPlace(place.placeId)} className="flex min-w-0 items-center gap-3 rounded-2xl border bg-card p-3 text-left">
               <span className="grid size-10 place-items-center rounded-xl bg-secondary">{i === 0 ? <Home className="size-4" /> : <MapPin className="size-4" />}</span>
               <span className="min-w-0">
                 <span className="block text-sm font-semibold">{place.label}</span>

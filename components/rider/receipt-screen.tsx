@@ -13,7 +13,7 @@ export function ReceiptScreen({ assignment, onDone, toast }: { assignment: TripA
   return (
     <div className="px-5 pb-8 pt-6">
       <p className="text-center text-xs font-semibold tracking-widest text-muted-foreground">{t("rider.receipt.heading")}</p>
-      <h1 className="mt-2 text-center text-2xl font-semibold">{firm?.name ?? "Kigali City Cabs Cooperative"}</h1>
+      <h1 className="mt-2 text-center text-2xl font-semibold">{firm?.name ?? "—"}</h1>
       <p className="mt-1 text-center text-sm text-muted-foreground">{t("rider.receipt.issuedBy")}</p>
       <div className="my-5 border-t border-dashed" />
       <div className="space-y-3 text-sm">
@@ -23,11 +23,11 @@ export function ReceiptScreen({ assignment, onDone, toast }: { assignment: TripA
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">{t("rider.receipt.tin")}</span>
-          <span>{firm?.tin ?? "103847261"}</span>
+          <span>{firm?.tin ?? "—"}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">{t("rider.receipt.licence")}</span>
-          <span className="text-right">{firm?.ruraLicenceNo ?? "RURA/TX/2025/0418"}</span>
+          <span className="text-right">{firm?.ruraLicenceNo ?? "—"}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">{t("rider.receipt.date")}</span>

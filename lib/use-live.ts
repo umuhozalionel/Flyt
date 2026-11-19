@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useEffectEvent, useState } from "react"
+import { useEffect, useEffectEvent, useState, useSyncExternalStore } from "react"
 import { subscribe, type Topic } from "./api"
 
 /**
@@ -33,17 +33,20 @@ export function useLive<T>(load: () => Promise<T>, topics: Topic[], deps: unknow
   return { data: fresh ? state.data : undefined, error: fresh ? state.error : undefined, loading: !fresh }
 }
 
-/** True when the browser reports no network connection. */
+function subscribeOnline(onChange: () => void) {
+  window.addEventListener("online", onChange)
+  window.addEventListener("offline", onChange)
+  return () => {
+    window.removeEventListener("online", onChange)
+    window.removeEventListener("offline", onChange)
+  }
+}
+
+/** True unless the browser reports no network connection. The server render always assumes online. */
 export function useOnline() {
-  const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine))
-  useEffect(() => {
-    const update = () => setOnline(navigator.onLine)
-    window.addEventListener("online", update)
-    window.addEventListener("offline", update)
-    return () => {
-      window.removeEventListener("online", update)
-      window.removeEventListener("offline", update)
-    }
-  }, [])
-  return online
+  return useSyncExternalStore(
+    subscribeOnline,
+    () => navigator.onLine,
+    () => true,
+  )
 }

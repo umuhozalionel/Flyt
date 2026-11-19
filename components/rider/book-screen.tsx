@@ -1,7 +1,8 @@
 "use client"
 
-import { CalendarDays, CarFront, Check, ChevronDown, Clock3, Minus, Navigation2, Plus } from "lucide-react"
+import { CalendarDays, CarFront, Check, ChevronDown, Clock3, Minus, Navigation2, Plus, Users, WifiOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/shared/skeleton"
 import { formatMoney } from "@/lib/format"
 import { useT, type TranslationKey } from "@/lib/i18n"
 import { places } from "@/lib/places"
@@ -12,6 +13,7 @@ export type OptionQuote = { fare: number; distanceKm: number; rate?: number } | 
 
 const rideOptions: { type: TripType; label: TranslationKey; detail: TranslationKey; icon: typeof CarFront }[] = [
   { type: "private", label: "rider.book.private", detail: "rider.book.privateDetail", icon: CarFront },
+  { type: "shared_commute", label: "rider.book.shared", detail: "rider.book.sharedDetail", icon: Users },
   { type: "airport", label: "rider.book.airport", detail: "rider.book.airportDetail", icon: Navigation2 },
   { type: "hourly", label: "rider.book.hourly", detail: "rider.book.hourlyDetail", icon: Clock3 },
   { type: "daily", label: "rider.book.daily", detail: "rider.book.dailyDetail", icon: CalendarDays },
@@ -28,13 +30,17 @@ export function BookScreen(props: {
   setDraft: (update: Partial<BookingDraft>) => void
   quotes?: Partial<Record<TripType, OptionQuote>>
   company?: Company
+  routeName?: string
+  offline: boolean
   busy: boolean
   onConfirm: () => void
 }) {
   const t = useT()
   const { draft, setDraft, quotes, company, busy } = props
   const touchesAirport = draft.pickup === "airport" || draft.dropoff === "airport"
-  const options = rideOptions.filter((option) => option.type !== "airport" || touchesAirport)
+  // Shared commute is only for company staff; airport only when one end is the airport.
+  const options = rideOptions.filter((option) => (option.type !== "airport" || touchesAirport) && (option.type !== "shared_commute" || !!company))
+  const shared = draft.type === "shared_commute"
   const selected = quotes?.[draft.type]
   const isHire = draft.type === "hourly" || draft.type === "daily"
 
@@ -66,7 +72,8 @@ export function BookScreen(props: {
         <span className="text-xs text-muted-foreground">{t("rider.book.carsOnly")}</span>
       </div>
       <div className="mt-3 flex flex-col gap-2">
-        {options.map(({ type, label, detail, icon: Icon }) => {
+        {!quotes && [0, 1, 2].map((i) => <Skeleton key={i} className="h-[76px]" />)}
+        {quotes && options.map(({ type, label, detail, icon: Icon }) => {
           const quote = quotes?.[type]
           return (
             <button
@@ -80,7 +87,7 @@ export function BookScreen(props: {
               <span className="min-w-0 flex-1">
                 <span className="block font-semibold">{t(label)}</span>
                 <span className="block text-xs text-muted-foreground">
-                  {t(detail, { rate: quote && "rate" in quote && quote.rate ? formatMoney(quote.rate) : "" })} · {type === "airport" ? t("rider.book.eta", { min: 35 }) : t("rider.book.eta", { min: 12 })}
+                  {t(detail, { rate: quote && "rate" in quote && quote.rate ? formatMoney(quote.rate) : "", company: company?.name ?? "" })} · {type === "airport" ? t("rider.book.eta", { min: 35 }) : t("rider.book.eta", { min: 12 })}
                 </span>
               </span>
               <span className="text-right font-bold">{!quote ? "…" : "error" in quote ? <span className="text-xs font-medium text-muted-foreground">{quote.error}</span> : formatMoney(quote.fare)}</span>
@@ -91,6 +98,7 @@ export function BookScreen(props: {
           )
         })}
       </div>
+      {shared && <p className="mt-2 text-xs text-muted-foreground">{props.routeName ? t("rider.book.sharedRoute", { route: props.routeName }) : t("rider.book.sharedNoRoute")}</p>}
       {isHire && (
         <div className="mt-3 flex min-h-12 items-center justify-between rounded-xl border bg-card px-4 text-sm">
           <span>{draft.type === "hourly" ? t("rider.book.hours") : t("rider.book.days")}</span>
@@ -121,15 +129,16 @@ export function BookScreen(props: {
           <button
             key={method.id}
             onClick={() => setDraft({ payment: method.id })}
-            disabled={method.id === "company_account" && !company}
-            className={`min-h-[64px] rounded-xl border px-2 text-xs font-semibold ${draft.payment === method.id ? "border-primary bg-primary/5" : "bg-card"} disabled:cursor-not-allowed disabled:opacity-40`}
+            aria-pressed={(shared ? "company_account" : draft.payment) === method.id}
+            disabled={(method.id === "company_account" && !company) || (shared && method.id !== "company_account")}
+            className={`min-h-[64px] rounded-xl border px-2 text-xs font-semibold ${(shared ? "company_account" : draft.payment) === method.id ? "border-primary bg-primary/5" : "bg-card"} disabled:cursor-not-allowed disabled:opacity-40`}
           >
             <span className="block">{method.mark}</span>
             {t(method.label)}
           </button>
         ))}
       </div>
-      {draft.payment === "company_account" && company && <p className="mt-2 text-xs text-muted-foreground">{t("rider.book.billedTo", { company: company.name })}</p>}
+      {(shared || draft.payment === "company_account") && company && <p className="mt-2 text-xs text-muted-foreground">{t("rider.book.billedTo", { company: company.name })}</p>}
       <div className="mt-5 rounded-xl bg-secondary px-4 py-3">
         <div className="flex justify-between text-sm">
           <span>{selected && !("error" in selected) ? t("rider.book.estimate", { km: selected.distanceKm }) : t("rider.book.estimateNoKm")}</span>
@@ -137,7 +146,12 @@ export function BookScreen(props: {
         </div>
         <p className="mt-1 text-xs text-muted-foreground">{t("rider.book.fixedTax")}</p>
       </div>
-      <Button onClick={props.onConfirm} disabled={busy || !selected || "error" in selected} className="mt-5 min-h-14 w-full rounded-2xl text-base">
+      {props.offline && (
+        <p role="alert" className="mt-4 flex items-center gap-2 rounded-xl bg-destructive/10 p-3 text-sm text-destructive">
+          <WifiOff className="size-4 shrink-0" /> {t("common.offlineBook")}
+        </p>
+      )}
+      <Button onClick={props.onConfirm} disabled={busy || props.offline || !selected || "error" in selected} className="mt-5 min-h-14 w-full rounded-2xl text-base">
         {busy ? t("rider.book.finding") : selected && !("error" in selected) ? t("rider.book.confirm", { fare: formatMoney(selected.fare) }) : t("rider.book.confirmPlain")}
       </Button>
       <p className="mt-3 text-center text-xs text-muted-foreground">{t("rider.book.payDirect")}</p>
