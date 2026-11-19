@@ -1,7 +1,8 @@
-import RiderApp from "@/components/flyt/rider-app"
-import { getRiderDemoData } from "@/lib/api"
+"use client"
 
-export default async function RiderPage() {
-  const initialData = await getRiderDemoData()
-  return <RiderApp initialData={initialData} />
+import RiderApp from "@/components/rider/rider-app"
+
+// Routing only: the rider app loads its data on the client through lib/api.ts.
+export default function RiderPage() {
+  return <RiderApp />
 }

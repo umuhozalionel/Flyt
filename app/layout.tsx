@@ -1,47 +1,38 @@
-import { Analytics } from '@vercel/analytics/next'
-import type { Metadata, Viewport } from 'next'
-import './globals.css'
+import type { Metadata, Viewport } from "next"
+import { Providers } from "@/components/shared/providers"
+import { themeScript } from "@/components/shared/theme"
+import en from "@/lib/i18n/en"
+import "./globals.css"
 
 export const metadata: Metadata = {
-  title: 'Flyt — Your city. Your ride.',
-  description: 'Book a trusted ride around Kigali with Flyt and RURA-licensed local partners.',
+  title: en["meta.title"],
+  description: en["meta.description"],
   icons: {
     icon: [
-      {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
-        media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
-      },
+      { url: "/icon-light-32x32.png", media: "(prefers-color-scheme: light)" },
+      { url: "/icon-dark-32x32.png", media: "(prefers-color-scheme: dark)" },
+      { url: "/icon.svg", type: "image/svg+xml" },
     ],
-    apple: '/apple-icon.png',
+    apple: "/apple-icon.png",
   },
 }
 
 export const viewport: Viewport = {
-  colorScheme: 'light dark',
+  colorScheme: "light dark",
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#f8faf6' },
-    { media: '(prefers-color-scheme: dark)', color: '#202923' },
+    { media: "(prefers-color-scheme: light)", color: "#f8faf6" },
+    { media: "(prefers-color-scheme: dark)", color: "#202923" },
   ],
 }
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode
-}>) {
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body className="antialiased">
-        {children}
-        {process.env.NODE_ENV === 'production' && <Analytics />}
+        <Providers>{children}</Providers>
       </body>
     </html>
   )
