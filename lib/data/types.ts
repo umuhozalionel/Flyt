@@ -5,6 +5,8 @@ import type {
   Car,
   CancelledBy,
   CommuteRoute,
+  DocumentType,
+  DriverApproval,
   Company,
   CompanyInvoice,
   Driver,
@@ -44,6 +46,25 @@ export interface QuoteInput { pickup: PlaceId; dropoff: PlaceId; type: TripType;
 export interface RideQuote extends FareQuote { firmId: string }
 
 export interface TripAssignment { trip: Trip; driver?: Driver; car?: Car; firm?: Firm; rider?: Rider }
+
+export type NewFirmInput = Pick<Firm, "name" | "type" | "ruraLicenceNo" | "licenceExpiry" | "tin" | "momoMerchantCode" | "airtelMerchantCode" | "feePercent" | "hourlyRate" | "dailyRate" | "status">
+
+/** Expiry dates ("YYYY-MM-DD") by document type. A type left out is recorded as missing. */
+export type DocumentExpiries = Partial<Record<DocumentType, string>>
+
+export interface NewDriverInput { firmId: string; name: string; phone: string; zone: PlaceId; carId?: string; documents: DocumentExpiries }
+export interface NewCarInput {
+  firmId: string
+  plate: string
+  make: string
+  model: string
+  colour: string
+  year: number
+  seats: number
+  power: Car["power"]
+  zone: PlaceId
+  documents: DocumentExpiries
+}
 
 export interface RiderProfileUpdate {
   name?: string
@@ -100,6 +121,12 @@ export interface DataSource {
   confirmPayment(tripId: string, received: boolean): Promise<Trip>
   rateTrip(tripId: string, rating: number, tags?: string[], comment?: string): Promise<Trip>
   rateRider(tripId: string, rating: number): Promise<Trip>
+
+  // Fleet (Ops)
+  addFirm(input: NewFirmInput): Promise<Firm>
+  addDriver(input: NewDriverInput): Promise<Driver>
+  addCar(input: NewCarInput): Promise<Car>
+  setDriverApproval(driverId: string, approval: Exclude<DriverApproval, "pending">): Promise<Driver>
 
   // Drivers
   setDriverPresence(driverId: string, presence: Exclude<DriverPresence, "on_trip">): Promise<Driver>

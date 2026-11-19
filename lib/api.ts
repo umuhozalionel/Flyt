@@ -7,7 +7,7 @@ import type { DataSource } from "./data/types"
 // NEXT_PUBLIC_DATA_SOURCE (mock by default). Screens never import mock data or Supabase directly.
 const source: DataSource = dataSource === "supabase" ? supabaseSource : mockSource
 
-export type { BookingInput, QuoteInput, RideQuote, RiderProfileUpdate, Topic, TripAssignment } from "./data/types"
+export type { BookingInput, DocumentExpiries, NewCarInput, NewDriverInput, NewFirmInput, QuoteInput, RideQuote, RiderProfileUpdate, Topic, TripAssignment } from "./data/types"
 
 export const subscribe: DataSource["subscribe"] = (topics, callback) => source.subscribe(topics, callback)
 
@@ -47,6 +47,11 @@ export const riderMarkPaid: DataSource["riderMarkPaid"] = (tripId) => source.rid
 export const confirmPayment: DataSource["confirmPayment"] = (tripId, received) => source.confirmPayment(tripId, received)
 export const rateTrip: DataSource["rateTrip"] = (tripId, rating, tags, comment) => source.rateTrip(tripId, rating, tags, comment)
 export const rateRider: DataSource["rateRider"] = (tripId, rating) => source.rateRider(tripId, rating)
+
+export const addFirm: DataSource["addFirm"] = (input) => source.addFirm(input)
+export const addDriver: DataSource["addDriver"] = (input) => source.addDriver(input)
+export const addCar: DataSource["addCar"] = (input) => source.addCar(input)
+export const setDriverApproval: DataSource["setDriverApproval"] = (driverId, approval) => source.setDriverApproval(driverId, approval)
 
 export const setDriverPresence: DataSource["setDriverPresence"] = (driverId, presence) => source.setDriverPresence(driverId, presence)
 

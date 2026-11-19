@@ -7,11 +7,12 @@ import { Logo } from "@/components/shared/logo"
 import { Skeleton } from "@/components/shared/skeleton"
 import { Toast, useToastMessage } from "@/components/shared/toast"
 import * as api from "@/lib/api"
-import { demoAutoDispatch, demoRiderId } from "@/lib/config"
+import { demoRiderId } from "@/lib/config"
 import { initials } from "@/lib/format"
 import { useLanguage, useT } from "@/lib/i18n"
 import { firmsOffering, quoteFare } from "@/lib/pricing"
 import { activeStatuses, cancelledStatuses } from "@/lib/trip-rules"
+import { useAutoDispatch } from "@/lib/use-demo"
 import { useLive, useOnline } from "@/lib/use-live"
 import { useStored } from "@/lib/use-stored"
 import type { Language, Trip, TripType } from "@/lib/types"
@@ -53,6 +54,8 @@ export default function RiderApp() {
   const t = useT()
   const { setLanguage } = useLanguage()
   const online = useOnline()
+  // Mock demo: Ops can turn this off on Dispatch to assign bookings by hand.
+  const [autoAssign] = useAutoDispatch()
   const [screen, setScreen] = useState<Screen>("home")
   const [riderId, setRiderId] = useStored<string>(RIDER_KEY, demoRiderId)
   const [tripId, setTripId] = useState<string>()
@@ -165,7 +168,7 @@ export default function RiderApp() {
       }
       go("finding")
       setBusy(false)
-      if (demoAutoDispatch) await autoDispatch(created)
+      if (autoAssign) await autoDispatch(created)
     } catch (error) {
       go("book")
       toast(errorText(error, t("rider.book.failed")))

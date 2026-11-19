@@ -1,4 +1,6 @@
 import { offerSeconds } from "../config"
+import { documentBlocks } from "../documents"
+import { buildDocuments, isWholeRwf, normalizePlate } from "../fleet"
 import { normalizePhone } from "../format"
 import { buildSeed, SEED_VERSION, type MockDb } from "../mock-data"
 import { FareError, fareSplit, firmsOffering, quoteFare } from "../pricing"
@@ -451,6 +453,77 @@ export const mockSource: DataSource = {
     trip.driverRating = rating
     commit(["trips"])
     return clone(trip)
+  },
+
+  async addFirm(input) {
+    await delay()
+    const s = store()
+    const name = input.name.trim()
+    if (!name) throw new Error("Enter the firm name")
+    if (!input.ruraLicenceNo.trim()) throw new Error("Enter the RURA licence number")
+    if (!/^\d{9}$/.test(input.tin.trim())) throw new Error("TIN must be 9 digits")
+    if (!input.momoMerchantCode.trim() || !input.airtelMerchantCode.trim()) throw new Error("Enter both merchant codes")
+    if (![10, 12, 15].includes(input.feePercent)) throw new Error("Fee must be 10, 12 or 15%")
+    for (const rate of [input.hourlyRate, input.dailyRate]) if (rate != null && !isWholeRwf(rate)) throw new Error("Rates must be whole Rwf amounts")
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.licenceExpiry)) throw new Error("Enter the licence expiry date")
+    if (s.firms.some((firm) => firm.ruraLicenceNo.toLowerCase() === input.ruraLicenceNo.trim().toLowerCase())) throw new Error("A firm with this licence number already exists")
+    const firm: Firm = { ...input, id: `firm-${Date.now()}`, name, ruraLicenceNo: input.ruraLicenceNo.trim(), tin: input.tin.trim(), momoMerchantCode: input.momoMerchantCode.trim(), airtelMerchantCode: input.airtelMerchantCode.trim() }
+    s.firms.push(firm)
+    commit(["firms"])
+    return clone(firm)
+  },
+
+  async addDriver(input) {
+    await delay()
+    const s = store()
+    const name = input.name.trim()
+    if (!name) throw new Error("Enter the driver's name")
+    const phone = normalizePhone(input.phone)
+    if (!phone) throw new Error("Enter a valid Rwandan mobile number")
+    if (s.drivers.some((driver) => normalizePhone(driver.phone) === phone)) throw new Error("A driver with this phone number already exists")
+    findFirm(input.firmId)
+    if (input.carId) {
+      const car = s.cars.find((item) => item.id === input.carId)
+      if (!car || car.firmId !== input.firmId) throw new Error("Pick a car from the same firm")
+      if (s.drivers.some((driver) => driver.carId === car.id)) throw new Error("This car already has a driver")
+    }
+    const id = `driver-${Date.now()}`
+    // New drivers start pending until Flyt Operations checks their documents.
+    const driver: Driver = { id, firmId: input.firmId, name, phone, rating: 5, status: "offline", approval: "pending", zone: input.zone, carId: input.carId, documents: buildDocuments(id, "driver", input.documents) }
+    s.drivers.push(driver)
+    commit(["drivers"])
+    return clone(driver)
+  },
+
+  async addCar(input) {
+    await delay()
+    const s = store()
+    const plate = normalizePlate(input.plate)
+    if (!plate) throw new Error("Plate must look like RAB 123 C")
+    if (s.cars.some((car) => car.plate === plate)) throw new Error("A car with this plate already exists")
+    findFirm(input.firmId)
+    if (!input.make.trim() || !input.model.trim() || !input.colour.trim()) throw new Error("Enter the make, model and colour")
+    const thisYear = new Date().getFullYear()
+    if (!Number.isInteger(input.year) || input.year < 2000 || input.year > thisYear + 1) throw new Error(`Year must be between 2000 and ${thisYear + 1}`)
+    if (!Number.isInteger(input.seats) || input.seats < 1 || input.seats > 8) throw new Error("Seats must be 1 to 8")
+    const id = `car-${Date.now()}`
+    const car: Car = { id, firmId: input.firmId, plate, make: input.make.trim(), model: input.model.trim(), colour: input.colour.trim(), year: input.year, seats: input.seats, power: input.power, availability: "available", zone: input.zone, documents: buildDocuments(id, "car", input.documents) }
+    s.cars.push(car)
+    commit(["cars"])
+    return clone(car)
+  },
+
+  async setDriverApproval(driverId, approval) {
+    await delay()
+    const driver = findDriver(driverId)
+    if (approval === "suspended") {
+      if (driver.status === "on_trip") throw new Error("This driver is on a trip. Reassign or finish it first")
+      driver.status = "offline"
+    }
+    if (approval === "approved" && driver.documents.some((doc) => documentBlocks(doc))) throw new Error("Expired or missing documents must be fixed before approval")
+    driver.approval = approval
+    commit(["drivers"])
+    return clone(driver)
   },
 
   async setDriverPresence(driverId, presence) {
