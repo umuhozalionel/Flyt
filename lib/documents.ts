@@ -10,6 +10,7 @@ export const carDocumentTypes: DocumentType[] = ["registration", "inspection", "
 export function documentStatus(doc: Pick<ComplianceDocument, "review" | "expiryDate">, today: string = kigaliDay()): DocumentStatus {
   if (doc.review === "missing") return "missing"
   if (doc.review === "pending_review") return "pending_review"
+  if (doc.review === "rejected") return "rejected"
   if (!doc.expiryDate) return "valid"
   const daysLeft = daysBetween(today, doc.expiryDate)
   if (daysLeft < 0) return "expired"
@@ -17,8 +18,8 @@ export function documentStatus(doc: Pick<ComplianceDocument, "review" | "expiryD
   return "valid"
 }
 
-/** True when a document blocks work: expired or missing. */
+/** True when a document blocks work: expired, missing or rejected. */
 export function documentBlocks(doc: Pick<ComplianceDocument, "review" | "expiryDate">, today?: string) {
   const status = documentStatus(doc, today)
-  return status === "expired" || status === "missing"
+  return status === "expired" || status === "missing" || status === "rejected"
 }

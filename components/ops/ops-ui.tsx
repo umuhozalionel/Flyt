@@ -119,6 +119,17 @@ export function CancelTripDialog({ tripId, busy, onConfirm, onClose }: { tripId:
   )
 }
 
+/** Shown on screens only platform admins may open, when a firm admin reaches them by link. */
+export function PlatformOnly() {
+  const t = useT()
+  return (
+    <div role="alert" className="rounded-2xl border bg-card p-6 text-sm">
+      <p className="font-semibold">{t("ops.platformOnly")}</p>
+      <p className="mt-1 text-muted-foreground">{t("ops.platformOnlyDetail")}</p>
+    </div>
+  )
+}
+
 /** A filter chip row value for search inputs. */
 export const matches = (query: string, ...values: (string | undefined)[]) => {
   const needle = query.trim().toLowerCase()

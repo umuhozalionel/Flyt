@@ -49,9 +49,9 @@ export type DocumentType =
   | "inspection"
   | "insurance"
 /** Stored review state. The status shown to people is worked out from this and the expiry date. */
-export type DocumentReview = "on_file" | "missing" | "pending_review"
+export type DocumentReview = "on_file" | "missing" | "pending_review" | "rejected"
 /** Status shown in the UI (see documentStatus in lib/documents.ts). */
-export type DocumentStatus = "valid" | "expiring_soon" | "expired" | "missing" | "pending_review"
+export type DocumentStatus = "valid" | "expiring_soon" | "expired" | "missing" | "pending_review" | "rejected"
 export type OfferStatus = "pending" | "accepted" | "declined" | "expired"
 export type InvoiceStatus = "draft" | "sent" | "paid"
 export type IncidentType = "safety" | "complaint" | "damage" | "other"
@@ -59,7 +59,14 @@ export type IncidentStatus = "open" | "investigating" | "closed"
 export type AdminRole = "platform_admin" | "firm_admin" | "company_admin"
 export type PlanName = "Baseline" | "Test"
 
-export interface ComplianceDocument { id: string; type: DocumentType; expiryDate?: string; review: DocumentReview }
+export interface ComplianceDocument {
+  id: string
+  type: DocumentType
+  expiryDate?: string
+  review: DocumentReview
+  /** Why Flyt Operations rejected the document. Shown to the driver. */
+  rejectReason?: string
+}
 export interface SavedPlace { id: string; label: string; placeId: PlaceId }
 export interface EmergencyContact { id: string; name: string; phone: string }
 
@@ -103,6 +110,8 @@ export interface Driver {
   zone: PlaceId
   carId?: string
   documents: ComplianceDocument[]
+  /** Suspended while on a trip: the suspension takes effect when that trip ends. */
+  suspendAfterTrip?: boolean
 }
 
 export interface Car {

@@ -1,11 +1,16 @@
 import { offerSeconds } from "../config"
 import { documentBlocks } from "../documents"
+import { riderForDriver } from "../driver"
+import { pickupEtas } from "../eta"
+import { makeJoinCode } from "../company"
+import { canInvoicePeriod, generateInvoices, nextInvoiceStatus } from "../invoices"
+import { kigaliDay } from "../time"
 import { buildDocuments, isWholeRwf, normalizePlate } from "../fleet"
 import { normalizePhone } from "../format"
 import { buildSeed, SEED_VERSION, type MockDb } from "../mock-data"
 import { FareError, fareSplit, firmsOffering, quoteFare } from "../pricing"
 import { assertMove, reassignableStatuses } from "../trip-rules"
-import type { Car, Driver, Firm, Rider, Trip, TripStatus } from "../types"
+import type { AdminUser, Car, Company, Driver, Firm, Rider, Trip, TripStatus } from "../types"
 import type { DataSource, QuoteInput, RideQuote, Topic } from "./types"
 
 // Mock data source: a client-side store seeded from lib/mock-data.ts.
@@ -106,6 +111,11 @@ function release(trip: Trip) {
   if (!trip.driverId) return
   const driver = store().drivers.find((item) => item.id === trip.driverId)
   if (driver && driver.status === "on_trip") driver.status = "online"
+  if (driver?.suspendAfterTrip) {
+    driver.approval = "suspended"
+    driver.status = "offline"
+    driver.suspendAfterTrip = undefined
+  }
   const car = store().cars.find((item) => item.id === trip.carId)
   if (car && car.availability === "in_use") car.availability = "available"
 }
@@ -237,6 +247,11 @@ export const mockSource: DataSource = {
       company = match.id
     }
     if (existing) {
+      // Staff added by their company admin accept the Terms on their first sign-in.
+      if (!existing.consentAt) {
+        if (!consent) throw new Error("Accept the Terms and Privacy Policy to continue")
+        existing.consentAt = nowIso()
+      }
       if (company) existing.companyId = company
       commit(["riders"])
       return clone(existing)
@@ -261,6 +276,13 @@ export const mockSource: DataSource = {
   async quoteTrip(input) {
     await delay(120)
     return quote(input)
+  },
+
+  async getPickupEtas(pickup, types) {
+    await delay(120)
+    expireOffers()
+    const s = store()
+    return pickupEtas(pickup, types, s.drivers, s.cars, s.firms)
   },
 
   async createBooking(input) {
@@ -516,12 +538,188 @@ export const mockSource: DataSource = {
   async setDriverApproval(driverId, approval) {
     await delay()
     const driver = findDriver(driverId)
-    if (approval === "suspended") {
-      if (driver.status === "on_trip") throw new Error("This driver is on a trip. Reassign or finish it first")
-      driver.status = "offline"
+    if (approval === "suspended" && driver.status === "on_trip") {
+      // Never stop a trip midway: the suspension takes effect when the current trip ends.
+      driver.suspendAfterTrip = true
+      commit(["drivers"])
+      return clone(driver)
     }
-    if (approval === "approved" && driver.documents.some((doc) => documentBlocks(doc))) throw new Error("Expired or missing documents must be fixed before approval")
+    if (approval === "suspended") driver.status = "offline"
+    if (approval === "approved" && driver.documents.some((doc) => documentBlocks(doc))) throw new Error("Expired, missing or rejected documents must be fixed before approval")
     driver.approval = approval
+    commit(["drivers"])
+    return clone(driver)
+  },
+
+  async reviewDocument({ adminId, owner, ownerId, type, decision, reason }) {
+    await delay()
+    const s = store()
+    const admin = s.admins.find((item) => item.id === adminId)
+    if (admin?.role !== "platform_admin") throw new Error("Only platform admins can approve or reject documents")
+    const holder = owner === "driver" ? s.drivers.find((item) => item.id === ownerId) : s.cars.find((item) => item.id === ownerId)
+    if (!holder) throw new Error(owner === "driver" ? "Driver not found" : "Car not found")
+    const doc = holder.documents.find((item) => item.type === type)
+    if (!doc) throw new Error("Unknown document")
+    if (doc.review !== "pending_review") throw new Error("This document is not waiting for review")
+    if (decision === "reject") {
+      if (!reason?.trim()) throw new Error("Give a reason the driver can act on")
+      doc.review = "rejected"
+      doc.rejectReason = reason.trim().slice(0, 200)
+    } else {
+      if (type !== "national_id" && doc.expiryDate && doc.expiryDate < kigaliDay()) throw new Error("This document has already expired")
+      doc.review = "on_file"
+      doc.rejectReason = undefined
+    }
+    // A driver who was online with a document that is now rejected goes offline.
+    if (owner === "driver" && decision === "reject") {
+      const driver = holder as Driver
+      if (driver.status === "online") driver.status = "offline"
+    }
+    commit([owner === "driver" ? "drivers" : "cars"])
+    return clone(doc)
+  },
+
+  async addCompany(input) {
+    await delay()
+    const s = store()
+    const name = input.name.trim()
+    if (!name) throw new Error("Enter the company name")
+    if (!input.contactName.trim()) throw new Error("Enter the contact person")
+    const phone = normalizePhone(input.phone)
+    if (!phone) throw new Error("Enter a valid Rwandan mobile number")
+    if (!Number.isInteger(input.staffCount) || input.staffCount < 1) throw new Error("Staff count must be a whole number")
+    if (s.companies.some((item) => item.name.toLowerCase() === name.toLowerCase())) throw new Error("A company with this name already exists")
+    const taken = s.companies.map((item) => item.joinCode)
+    const joinCode = input.joinCode?.trim().toUpperCase() || makeJoinCode(name, taken)
+    if (!/^[A-Z0-9-]{4,20}$/.test(joinCode)) throw new Error("Join code: 4 to 20 letters, digits or dashes")
+    if (taken.some((code) => code.toLowerCase() === joinCode.toLowerCase())) throw new Error("This join code is already used")
+    const company: Company = { id: `co-${Date.now()}`, name, contactName: input.contactName.trim(), phone, staffCount: input.staffCount, status: input.status, joinCode }
+    s.companies.push(company)
+    commit(["companies"])
+    return clone(company)
+  },
+
+  async addStaff(companyId, input) {
+    await delay()
+    const s = store()
+    const company = s.companies.find((item) => item.id === companyId)
+    if (!company) throw new Error("Company not found")
+    const phone = normalizePhone(input.phone)
+    if (!phone) throw new Error("Enter a valid Rwandan mobile number")
+    const existing = s.riders.find((rider) => normalizePhone(rider.phone) === phone)
+    if (existing) {
+      if (existing.companyId === companyId) throw new Error("This person is already on your staff list")
+      if (existing.companyId) throw new Error("This person is linked to another company")
+      existing.companyId = companyId
+      commit(["riders"])
+      return clone(existing)
+    }
+    if (!input.name.trim()) throw new Error("Enter the person's name")
+    // Their account is ready; they accept the Terms when they first sign in with this number.
+    const rider: Rider = { ...newRider(phone, input.name.trim(), companyId), consentAt: undefined }
+    s.riders.unshift(rider)
+    commit(["riders"])
+    return clone(rider)
+  },
+
+  async removeStaff(companyId, riderId) {
+    await delay()
+    const s = store()
+    const rider = s.riders.find((item) => item.id === riderId)
+    if (!rider || rider.companyId !== companyId) throw new Error("This person is not on your staff list")
+    rider.companyId = undefined
+    for (const route of s.commuteRoutes) if (route.companyId === companyId) route.riderIds = route.riderIds.filter((id) => id !== riderId)
+    commit(["riders", "routes"])
+    return clone(rider)
+  },
+
+  async generateInvoices(period) {
+    await delay(300)
+    if (!canInvoicePeriod(period)) throw new Error("Pick this month or an earlier month")
+    const s = store()
+    const result = generateInvoices(period, s.firms, s.companies, s.trips, s.feeInvoices, s.companyInvoices)
+    s.feeInvoices = result.feeInvoices
+    s.companyInvoices = result.companyInvoices
+    commit(["invoices"])
+    return { period, created: result.created, refreshed: result.refreshed }
+  },
+
+  async setInvoiceStatus(kind, invoiceId, status) {
+    await delay()
+    const s = store()
+    const invoice = kind === "fee" ? s.feeInvoices.find((item) => item.id === invoiceId) : s.companyInvoices.find((item) => item.id === invoiceId)
+    if (!invoice) throw new Error("Invoice not found")
+    if (nextInvoiceStatus[invoice.status] !== status) throw new Error("Invoices move from draft to sent to paid")
+    invoice.status = status
+    commit(["invoices"])
+    return clone(invoice)
+  },
+
+  async addAdmin(input) {
+    await delay()
+    const s = store()
+    const name = input.name.trim()
+    if (!name) throw new Error("Enter the person's name")
+    const phone = normalizePhone(input.phone)
+    if (!phone) throw new Error("Enter a valid Rwandan mobile number")
+    if (s.admins.some((admin) => normalizePhone(admin.phone) === phone && admin.role === input.role)) throw new Error("This person already has this role")
+    if (input.role === "firm_admin" && !s.firms.some((firm) => firm.id === input.firmId)) throw new Error("Pick the firm")
+    if (input.role === "company_admin" && !s.companies.some((company) => company.id === input.companyId)) throw new Error("Pick the company")
+    const admin: AdminUser = { id: `admin-${Date.now()}`, name, phone, role: input.role, firmId: input.role === "firm_admin" ? input.firmId : undefined, companyId: input.role === "company_admin" ? input.companyId : undefined }
+    s.admins.push(admin)
+    commit(["admins"])
+    return clone(admin)
+  },
+
+  async removeAdmin(adminId, byAdminId) {
+    await delay()
+    const s = store()
+    const by = s.admins.find((item) => item.id === byAdminId)
+    if (by?.role !== "platform_admin") throw new Error("Only platform admins can change the team")
+    if (adminId === byAdminId) throw new Error("You cannot remove yourself")
+    const admin = s.admins.find((item) => item.id === adminId)
+    if (!admin) throw new Error("Team member not found")
+    if (admin.role === "platform_admin" && s.admins.filter((item) => item.role === "platform_admin").length <= 1) throw new Error("Keep at least one platform admin")
+    s.admins = s.admins.filter((item) => item.id !== adminId)
+    commit(["admins"])
+  },
+
+  async signInDriver({ phone }) {
+    await delay(300)
+    const normalized = normalizePhone(phone)
+    if (!normalized) throw new Error("Enter a valid Rwandan mobile number")
+    const driver = store().drivers.find((item) => normalizePhone(item.phone) === normalized)
+    if (!driver) throw new Error("This number is not registered with a Flyt partner firm")
+    return clone(driver)
+  },
+
+  async getDriverTrips(driverId) {
+    await delay()
+    expireOffers()
+    return clone(store().trips.filter((trip) => trip.driverId === driverId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
+  },
+
+  async getDriverJob(tripId, driverId) {
+    await delay()
+    expireOffers()
+    const s = store()
+    const trip = s.trips.find((item) => item.id === tripId)
+    // A driver sees a trip only while it is theirs, or once they drove it.
+    if (!trip || trip.driverId !== driverId) return undefined
+    const rider = s.riders.find((item) => item.id === trip.riderId)
+    return clone({ trip, rider: riderForDriver(trip, rider, s.trips.filter((item) => item.riderId === trip.riderId)), car: s.cars.find((item) => item.id === trip.carId), firm: s.firms.find((item) => item.id === trip.firmId) })
+  },
+
+  async submitDocument(driverId, type, expiryDate) {
+    await delay()
+    const driver = findDriver(driverId)
+    const doc = driver.documents.find((item) => item.type === type)
+    if (!doc) throw new Error("Unknown document")
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(expiryDate) && type !== "national_id") throw new Error("Enter the expiry date")
+    if (type !== "national_id" && expiryDate < kigaliDay()) throw new Error("This document has already expired")
+    doc.review = "pending_review"
+    doc.rejectReason = undefined
+    if (type !== "national_id") doc.expiryDate = expiryDate
     commit(["drivers"])
     return clone(driver)
   },
@@ -531,6 +729,7 @@ export const mockSource: DataSource = {
     const driver = findDriver(driverId)
     if (driver.status === "on_trip") throw new Error("Finish the current trip first")
     if (presence === "online" && driver.approval !== "approved") throw new Error("Your account is not approved yet")
+    if (presence === "online" && driver.documents.some((doc) => documentBlocks(doc))) throw new Error("A document is expired, missing or rejected. Send a new one before going online")
     driver.status = presence
     commit(["drivers"])
     return clone(driver)
@@ -576,6 +775,18 @@ export const mockSource: DataSource = {
     await delay()
     const incident = { id: `INC-${Date.now().toString().slice(-5)}`, status: "open" as const, notes: [], createdAt: nowIso(), ...input }
     store().incidents.unshift(incident)
+    commit(["incidents"])
+    return clone(incident)
+  },
+
+  async updateIncident(incidentId, update) {
+    await delay()
+    const incident = store().incidents.find((item) => item.id === incidentId)
+    if (!incident) throw new Error("Incident not found")
+    const note = update.note?.trim()
+    if (!note && !update.status) throw new Error("Add a note or change the status")
+    if (note) incident.notes.push(note.slice(0, 500))
+    if (update.status) incident.status = update.status
     commit(["incidents"])
     return clone(incident)
   },

@@ -81,6 +81,7 @@ export function DriversScreen() {
               <Td>{t(`ops.presence.${driver.status}` as TranslationKey)}</Td>
               <Td>
                 <ApprovalBadge approval={driver.approval} />
+                {driver.suspendAfterTrip && <span className="mt-1 block text-xs text-amber-700 dark:text-amber-300">{t("ops.drivers.suspendAfterTripShort")}</span>}
               </Td>
               <Td>
                 <StatusBadge status={worstDocumentStatus(driver.documents)} />
@@ -122,8 +123,8 @@ function DriverDetail({ driverId, data, onBack }: { driverId: string; data: OpsD
   async function setApproval(approval: "approved" | "suspended") {
     setBusy(true)
     try {
-      await api.setDriverApproval(driverId, approval)
-      toast(t(approval === "approved" ? "ops.drivers.approved" : "ops.drivers.suspended", { name: driver!.name }))
+      const updated = await api.setDriverApproval(driverId, approval)
+      toast(t(approval === "approved" ? "ops.drivers.approved" : updated.suspendAfterTrip ? "ops.drivers.suspendQueued" : "ops.drivers.suspended", { name: driver!.name }))
     } catch (caught) {
       toast(errorText(caught, t("ops.actionFailed")))
     } finally {
@@ -143,7 +144,7 @@ function DriverDetail({ driverId, data, onBack }: { driverId: string; data: OpsD
                 {t("ops.drivers.approve")}
               </Button>
             )}
-            {isPlatform && driver.approval !== "suspended" && (
+            {driver.approval !== "suspended" && !driver.suspendAfterTrip && (
               <Button variant="destructive" className="min-h-10" disabled={busy} onClick={() => void setApproval("suspended")}>
                 {t("ops.drivers.suspend")}
               </Button>
@@ -170,10 +171,15 @@ function DriverDetail({ driverId, data, onBack }: { driverId: string; data: OpsD
               [t("ops.drivers.trips"), t("ops.firms.tripsDetail", { total: trips.length, completed: completed.length })],
             ]}
           />
+          {driver.suspendAfterTrip && (
+            <p role="status" className="mt-3 rounded-xl bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
+              {t("ops.drivers.suspendPending")}
+            </p>
+          )}
           {!isPlatform && <p className="mt-3 text-xs text-muted-foreground">{t("ops.drivers.platformApproves")}</p>}
         </Card>
         <Card title={t("ops.drivers.documents")}>
-          <DocumentList documents={driver.documents} />
+          <DocumentList documents={driver.documents} owner="driver" ownerId={driver.id} />
         </Card>
         <Card title={t("ops.drivers.recentTrips")} className="lg:col-span-2">
           {trips.length ? (

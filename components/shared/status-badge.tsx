@@ -6,7 +6,7 @@ import type { DocumentStatus, TripStatus } from "@/lib/types"
 
 export function StatusBadge({ status }: { status: TripStatus | DocumentStatus }) {
   const t = useT()
-  const variant = status === "completed" || status === "valid" ? "secondary" : status.startsWith("cancelled") || status === "expired" || status === "missing" ? "destructive" : "outline"
+  const variant = status === "completed" || status === "valid" ? "secondary" : status.startsWith("cancelled") || status === "expired" || status === "missing" || status === "rejected" ? "destructive" : "outline"
   return <Badge variant={variant}>{t(`status.${status}` as TranslationKey)}</Badge>
 }
 

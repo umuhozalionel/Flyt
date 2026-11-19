@@ -148,7 +148,7 @@ function CarDetail({ carId, data, onBack }: { carId: string; data: OpsData; onBa
           />
         </Card>
         <Card title={t("ops.drivers.documents")}>
-          <DocumentList documents={car.documents} />
+          <DocumentList documents={car.documents} owner="car" ownerId={car.id} />
         </Card>
         <Card title={t("ops.drivers.recentTrips")} className="lg:col-span-2">
           {trips.length ? (

@@ -15,19 +15,11 @@ import { placeName } from "@/lib/places"
 import { reassignableStatuses } from "@/lib/trip-rules"
 import type { Trip } from "@/lib/types"
 import { useAutoDispatch } from "@/lib/use-demo"
+import { useNow } from "@/lib/use-now"
 import { errorText, useOps } from "./ops-context"
 import { useOpsData, type OpsData } from "./ops-data"
 import { CancelTripDialog, LoadError, Loading, PageHeader } from "./ops-ui"
 
-/** Current time, ticking every second, for waiting times and offer countdowns. */
-function useNow() {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(timer)
-  }, [])
-  return now
-}
 
 export function DispatchScreen() {
   const t = useT()
@@ -87,6 +79,7 @@ export function DispatchScreen() {
       onDemoAccept={(offerId) => void run(`${trip.id}-accept`, () => api.respondOffer(offerId, true), t("ops.dispatch.accepted", { id: trip.id }))}
       onCancel={() => setCancelling(trip.id)}
       scopeFirm={scope.firmId}
+      demo={auto}
     />
   )
 
@@ -147,6 +140,8 @@ function DispatchCard(props: {
   busy?: string
   reassigning: boolean
   scopeFirm?: string
+  /** Mock demo toggle is on: show the button that accepts for the driver. */
+  demo: boolean
   onReassignToggle: () => void
   onAssign: (driverId: string) => void
   onDemoAccept: (offerId: string) => void
@@ -235,7 +230,7 @@ function DispatchCard(props: {
             {props.reassigning ? t("ops.dispatch.hideReassign") : t("ops.dispatch.reassign")}
           </Button>
         )}
-        {demoAutoDispatch && offer && (
+        {props.demo && offer && (
           <Button variant="secondary" className="min-h-10" disabled={!!props.busy} onClick={() => props.onDemoAccept(offer.id)}>
             {t("ops.dispatch.demoAccept")}
           </Button>

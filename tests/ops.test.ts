@@ -130,10 +130,16 @@ describe("fleet writes", () => {
     await expect(api.addDriver({ firmId: "firm-1", name: "X", phone: "0788 999 999", zone: "remera", carId: "car-1", documents: {} })).rejects.toThrow("already has a driver")
   })
 
-  test("suspend sets an online driver offline and refuses a driver on a trip", async () => {
+  test("suspend sets an online driver offline; a driver on a trip is suspended when the trip ends", async () => {
     const suspended = await api.setDriverApproval("driver-2", "suspended")
     expect(suspended).toMatchObject({ approval: "suspended", status: "offline" })
-    await expect(api.setDriverApproval("driver-5", "suspended")).rejects.toThrow("on a trip")
+    const onTrip = await api.setDriverApproval("driver-5", "suspended") // driver-5 is driving an in-progress trip
+    expect(onTrip).toMatchObject({ approval: "approved", status: "on_trip", suspendAfterTrip: true })
+    const trip = (await api.getTrips()).find((item) => item.driverId === "driver-5" && item.status === "in_progress")!
+    await api.endTrip(trip.id)
+    const after = (await api.getDrivers()).find((item) => item.id === "driver-5")!
+    expect(after).toMatchObject({ approval: "suspended", status: "offline" })
+    expect(after.suspendAfterTrip).toBeUndefined()
     await expect(api.setDriverApproval("driver-6", "approved")).rejects.toThrow("missing") // criminal record missing in the seed
   })
 

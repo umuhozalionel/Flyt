@@ -5,8 +5,11 @@ export const featureFlags = { publicSharedRides: false, privateOwnerCars: false,
 export const dataSource: "mock" | "supabase" = process.env.NEXT_PUBLIC_DATA_SOURCE === "supabase" ? "supabase" : "mock"
 
 export const demoRiderId = "rider-1"
-/** Mock demo only: after a rider books, assign the nearest free driver and accept for them, as Part 1 did before Dispatch and the driver app exist. */
-export const demoAutoDispatch = true
+/**
+ * Demo helpers (auto-assign new bookings, accept or drive a trip for the driver) exist only with mock data.
+ * They are off by default and switched on from Dispatch. They never run in Supabase mode.
+ */
+export const demoAutoDispatch = dataSource === "mock"
 export const demoEmergencyNumber = "+250 788 000 000"
 export const supportEmail = "hello@flyt.rw"
 

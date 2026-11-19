@@ -32,3 +32,10 @@ export function daysBetween(fromDay: string, toDay: string) {
 export function addDays(value: Date, days: number) {
   return new Date(value.getTime() + days * 86_400_000)
 }
+
+/** Part of the day for a greeting, from the Kigali hour: morning 05–11, afternoon 12–17, evening 18–04. */
+export function partOfDay(hour: number): "morning" | "afternoon" | "evening" {
+  if (hour >= 5 && hour < 12) return "morning"
+  if (hour >= 12 && hour < 18) return "afternoon"
+  return "evening"
+}

@@ -31,7 +31,7 @@ export function ReceiptScreen({ assignment, onDone, toast }: { assignment: TripA
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">{t("rider.receipt.date")}</span>
-          <span>{formatDate(trip.createdAt)}</span>
+          <span>{formatDate(trip.completedAt ?? trip.createdAt)}</span>
         </div>
       </div>
       <div className="my-5 border-t border-dashed" />

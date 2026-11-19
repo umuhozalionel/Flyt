@@ -6,10 +6,13 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { MapView } from "@/components/shared/map-view"
 import { Skeleton } from "@/components/shared/skeleton"
-import { demoAutoDispatch, demoEmergencyNumber } from "@/lib/config"
+import { demoEmergencyNumber } from "@/lib/config"
 import { formatMoney, initials } from "@/lib/format"
 import { useT, type TranslationKey } from "@/lib/i18n"
+import { driveMinutes, kmBetween, minutesLeft, pickupMinutes } from "@/lib/eta"
 import { placeName } from "@/lib/places"
+import { useNow } from "@/lib/use-now"
+import { useAutoDispatch } from "@/lib/use-demo"
 import { TripSteps } from "./trip-steps"
 import type { TripAssignment } from "./types"
 
@@ -25,12 +28,27 @@ export function TripScreen(props: {
 }) {
   const t = useT()
   const [showSos, setShowSos] = useState(false)
+  // Mock demo only: drive the trip from here when the Dispatch demo toggle is on. Normally the driver app does it.
+  const [demo] = useAutoDispatch()
   const { trip, driver, car, firm } = props.assignment
   const waitingForAccept = trip.status === "assigned"
   const canCancel = ["assigned", "driver_arriving", "driver_arrived"].includes(trip.status)
 
+  const now = useNow(15_000)
+  // Estimates from the driver's zone and the trip distance (see lib/eta.ts), counting down from when the driver set off.
+  const toPickup = driver ? minutesLeft(pickupMinutes(kmBetween(driver.zone, trip.pickup)), trip.acceptedAt, now) : undefined
+  const toDropoff = trip.distanceKm > 0 ? minutesLeft(driveMinutes(trip.distanceKm), trip.startedAt, now) : undefined
+
   const heading =
-    trip.status === "driver_arrived" ? t("rider.trip.driverHere") : trip.status === "in_progress" ? t("rider.trip.enjoy") : waitingForAccept ? t("rider.trip.waitingAccept") : t("rider.trip.arrivingIn", { min: 4 })
+    trip.status === "driver_arrived"
+      ? t("rider.trip.driverHere")
+      : trip.status === "in_progress"
+        ? toDropoff
+          ? t("rider.trip.dropoffIn", { min: toDropoff })
+          : t("rider.trip.enjoy")
+        : waitingForAccept || toPickup == null
+          ? t("rider.trip.waitingAccept")
+          : t("rider.trip.arrivingIn", { min: toPickup })
 
   return (
     <div className="px-5 pb-8 pt-5">
@@ -102,7 +120,7 @@ export function TripScreen(props: {
           <ShieldAlert className="size-4" /> {t("rider.trip.safety")}
         </Button>
       </div>
-      {demoAutoDispatch && (
+      {demo && (
         <div className="mt-5 flex flex-col gap-2">
           {trip.status === "driver_arriving" && (
             <Button onClick={props.onArrived} disabled={props.busy} className="min-h-14">

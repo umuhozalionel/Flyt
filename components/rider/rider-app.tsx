@@ -81,6 +81,7 @@ export default function RiderApp() {
   const pricing = useLive(() => api.getPricing(), ["pricing"])
   const routes = useLive(() => api.getCommuteRoutes(), ["routes"])
   const trips = useLive(() => api.getRiderTrips(riderId), ["trips"], [riderId])
+  const etas = useLive(() => api.getPickupEtas(draft.pickup, ["private", "shared_commute", "airport", "hourly", "daily"]), ["drivers", "cars", "firms"], [draft.pickup])
   const assignment = useLive(() => (tripId ? api.getTripAssignment(tripId) : Promise.resolve(undefined)), ["trips", "drivers", "cars", "firms"], [tripId])
 
   const rider = riderData.data
@@ -93,7 +94,7 @@ export default function RiderApp() {
   let shown: Screen = screen
   if (current) {
     const status = current.trip.status
-    if (screen === "finding" && status !== "requested" && status !== "no_driver_found") shown = screenFor(current.trip)
+    if (screen === "finding" && status !== "requested" && status !== "no_driver_found") shown = status === "completed" ? "complete" : screenFor(current.trip)
     else if (screen === "trip" && status === "completed") shown = "complete"
     else if (screen === "trip" && (cancelledStatuses.includes(status) || status === "requested")) shown = status === "requested" ? "finding" : "detail"
   }
@@ -280,7 +281,7 @@ export default function RiderApp() {
                 onAddPlace={() => go("places")}
               />
             )}
-            {shown === "book" && <BookScreen draft={draft} setDraft={setDraft} quotes={quotes} company={company} routeName={route?.name} offline={!online} busy={busy} onConfirm={() => void bookRide()} />}
+            {shown === "book" && <BookScreen draft={draft} setDraft={setDraft} quotes={quotes} etas={etas.data} company={company} routeName={route?.name} offline={!online} busy={busy} onConfirm={() => void bookRide()} />}
             {shown === "finding" && current && <FindingScreen trip={current.trip} onCancel={() => setCancelling(true)} onEdit={() => go("book")} onHome={() => go("home")} />}
             {shown === "trip" && current && (
               <TripScreen

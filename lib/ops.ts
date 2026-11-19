@@ -1,6 +1,6 @@
 import { documentStatus, EXPIRY_WARNING_DAYS } from "./documents"
 import { feeInvoiceFor } from "./invoices"
-import { distanceBetween } from "./places"
+import { kmBetween } from "./eta"
 import { daysBetween, kigaliDay, kigaliMonth } from "./time"
 import { activeStatuses } from "./trip-rules"
 import type { AdminUser, Car, ComplianceDocument, DocumentStatus, DocumentType, Driver, FeeInvoice, Firm, Incident, PlaceId, Trip } from "./types"
@@ -46,7 +46,7 @@ export function opsKpis(trips: Trip[], drivers: Driver[], today: string = kigali
   }
 }
 
-const severity: DocumentStatus[] = ["expired", "missing", "expiring_soon", "pending_review", "valid"]
+const severity: DocumentStatus[] = ["expired", "rejected", "missing", "expiring_soon", "pending_review", "valid"]
 
 /** The status that needs attention first among a set of documents. */
 export function worstDocumentStatus(documents: ComplianceDocument[], today?: string): DocumentStatus {
@@ -60,19 +60,19 @@ export interface DocumentAlert {
   ownerName: string
   firmId: string
   docType: DocumentType | "rura_licence"
-  status: "expired" | "missing" | "expiring_soon"
+  status: "expired" | "rejected" | "missing" | "expiring_soon"
   expiryDate?: string
   /** Days until expiry; negative when already expired. */
   daysLeft?: number
 }
 
-/** Documents and firm licences that are expired, missing, or expire within 30 days. Most urgent first. */
+/** Documents and firm licences that are expired, rejected, missing, or expire within 30 days. Most urgent first. */
 export function documentAlerts(drivers: Driver[], cars: Car[], firms: Firm[], today: string = kigaliDay()): DocumentAlert[] {
   const alerts: DocumentAlert[] = []
   const add = (kind: DocumentAlert["kind"], ownerId: string, ownerName: string, firmId: string, doc: ComplianceDocument) => {
     const status = documentStatus(doc, today)
-    if (status !== "expired" && status !== "missing" && status !== "expiring_soon") return
-    const dated = status !== "missing" && doc.expiryDate
+    if (status !== "expired" && status !== "rejected" && status !== "missing" && status !== "expiring_soon") return
+    const dated = status !== "missing" && status !== "rejected" && doc.expiryDate
     alerts.push({ kind, ownerId, ownerName, firmId, docType: doc.type, status, expiryDate: dated ? doc.expiryDate : undefined, daysLeft: dated ? daysBetween(today, doc.expiryDate!) : undefined })
   }
   for (const driver of drivers) for (const doc of driver.documents) add("driver", driver.id, driver.name, driver.firmId, doc)
@@ -81,7 +81,7 @@ export function documentAlerts(drivers: Driver[], cars: Car[], firms: Firm[], to
     const daysLeft = daysBetween(today, firm.licenceExpiry)
     if (daysLeft <= EXPIRY_WARNING_DAYS) alerts.push({ kind: "firm", ownerId: firm.id, ownerName: firm.name, firmId: firm.id, docType: "rura_licence", status: daysLeft < 0 ? "expired" : "expiring_soon", expiryDate: firm.licenceExpiry, daysLeft })
   }
-  const rank = (alert: DocumentAlert) => (alert.status === "expired" ? 0 : alert.status === "missing" ? 1 : 2)
+  const rank = (alert: DocumentAlert) => (alert.status === "expired" ? 0 : alert.status === "rejected" || alert.status === "missing" ? 1 : 2)
   return alerts.sort((a, b) => rank(a) - rank(b) || (a.daysLeft ?? 0) - (b.daysLeft ?? 0))
 }
 
@@ -102,7 +102,7 @@ export interface DriverSuggestion { driver: Driver; car: Car; firm: Firm; km: nu
 
 /** Road km from a driver's zone to the pickup. 0 when they are in the same place. */
 export function kmToPickup(zone: PlaceId, pickup: PlaceId) {
-  return zone === pickup ? 0 : distanceBetween(zone, pickup)
+  return kmBetween(zone, pickup)
 }
 
 /**

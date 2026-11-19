@@ -7,7 +7,7 @@ import type { DataSource } from "./data/types"
 // NEXT_PUBLIC_DATA_SOURCE (mock by default). Screens never import mock data or Supabase directly.
 const source: DataSource = dataSource === "supabase" ? supabaseSource : mockSource
 
-export type { BookingInput, DocumentExpiries, NewCarInput, NewDriverInput, NewFirmInput, QuoteInput, RideQuote, RiderProfileUpdate, Topic, TripAssignment } from "./data/types"
+export type { BookingInput, DocumentExpiries, DocumentReviewInput, DriverJob, InvoiceRun, NewAdminInput, NewCarInput, NewCompanyInput, NewDriverInput, NewFirmInput, NewStaffInput, QuoteInput, RideQuote, RiderProfileUpdate, Topic, TripAssignment } from "./data/types"
 
 export const subscribe: DataSource["subscribe"] = (topics, callback) => source.subscribe(topics, callback)
 
@@ -33,6 +33,7 @@ export const signInRider: DataSource["signInRider"] = (input) => source.signInRi
 export const updateRider: DataSource["updateRider"] = (riderId, update) => source.updateRider(riderId, update)
 
 export const quoteTrip: DataSource["quoteTrip"] = (input) => source.quoteTrip(input)
+export const getPickupEtas: DataSource["getPickupEtas"] = (pickup, types) => source.getPickupEtas(pickup, types)
 export const createBooking: DataSource["createBooking"] = (input) => source.createBooking(input)
 export const assignDriver: DataSource["assignDriver"] = (tripId, driverId) => source.assignDriver(tripId, driverId)
 export const reassignDriver: DataSource["reassignDriver"] = (tripId, driverId) => source.reassignDriver(tripId, driverId)
@@ -52,7 +53,22 @@ export const addFirm: DataSource["addFirm"] = (input) => source.addFirm(input)
 export const addDriver: DataSource["addDriver"] = (input) => source.addDriver(input)
 export const addCar: DataSource["addCar"] = (input) => source.addCar(input)
 export const setDriverApproval: DataSource["setDriverApproval"] = (driverId, approval) => source.setDriverApproval(driverId, approval)
+export const reviewDocument: DataSource["reviewDocument"] = (input) => source.reviewDocument(input)
 
+export const addCompany: DataSource["addCompany"] = (input) => source.addCompany(input)
+export const addStaff: DataSource["addStaff"] = (companyId, input) => source.addStaff(companyId, input)
+export const removeStaff: DataSource["removeStaff"] = (companyId, riderId) => source.removeStaff(companyId, riderId)
+
+export const generateInvoices: DataSource["generateInvoices"] = (period) => source.generateInvoices(period)
+export const setInvoiceStatus: DataSource["setInvoiceStatus"] = (kind, invoiceId, status) => source.setInvoiceStatus(kind, invoiceId, status)
+
+export const addAdmin: DataSource["addAdmin"] = (input) => source.addAdmin(input)
+export const removeAdmin: DataSource["removeAdmin"] = (adminId, byAdminId) => source.removeAdmin(adminId, byAdminId)
+
+export const signInDriver: DataSource["signInDriver"] = (input) => source.signInDriver(input)
+export const getDriverTrips: DataSource["getDriverTrips"] = (driverId) => source.getDriverTrips(driverId)
+export const getDriverJob: DataSource["getDriverJob"] = (tripId, driverId) => source.getDriverJob(tripId, driverId)
+export const submitDocument: DataSource["submitDocument"] = (driverId, type, expiryDate) => source.submitDocument(driverId, type, expiryDate)
 export const setDriverPresence: DataSource["setDriverPresence"] = (driverId, presence) => source.setDriverPresence(driverId, presence)
 
 export const setActivePlan: DataSource["setActivePlan"] = (name) => source.setActivePlan(name)
@@ -61,6 +77,7 @@ export const updateAirportZones: DataSource["updateAirportZones"] = (zones) => s
 export const setFirmFee: DataSource["setFirmFee"] = (firmId, feePercent) => source.setFirmFee(firmId, feePercent)
 
 export const reportIncident: DataSource["reportIncident"] = (input) => source.reportIncident(input)
+export const updateIncident: DataSource["updateIncident"] = (incidentId, update) => source.updateIncident(incidentId, update)
 
 export const resetDemo = () => source.resetDemo?.() ?? Promise.resolve()
 export const isDemoData = dataSource === "mock"

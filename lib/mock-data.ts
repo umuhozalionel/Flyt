@@ -1,3 +1,4 @@
+import { offerSeconds } from "./config"
 import { companyInvoiceFor, feeInvoiceFor } from "./invoices"
 import { fareSplit, quoteFare } from "./pricing"
 import { addDays, kigaliDay, kigaliMonth, previousMonth } from "./time"
@@ -48,7 +49,7 @@ export interface MockDb {
   admins: AdminUser[]
 }
 
-export const SEED_VERSION = 2
+export const SEED_VERSION = 3
 /** Days since the pilot started when the seed is built. Weeks 1 to 4 use Baseline, weeks 5 to 8 use Test. */
 export const PILOT_DAY = 33
 export const TEST_PLAN_FROM_DAY = 28
@@ -319,6 +320,12 @@ export function buildSeed(now: Date = new Date()): MockDb {
     if (car && presence === "on_trip") car.availability = "in_use"
   }
 
+  // The assigned trip has its 20-second job offer open from the moment the demo data is built.
+  // If nobody accepts it in time, it expires and the trip goes back to the Dispatch queue (rule a).
+  const offers: JobOffer[] = trips
+    .filter((trip) => trip.status === "assigned" && trip.driverId)
+    .map((trip) => ({ id: `offer-seed-${trip.id}`, tripId: trip.id, driverId: trip.driverId!, status: "pending", createdAt: now.toISOString(), expiresAt: new Date(now.getTime() + offerSeconds * 1000).toISOString() }))
+
   const lastMonth = previousMonth(kigaliMonth(now))
   const feeInvoices: FeeInvoice[] = firms
     .filter((firm) => firm.status === "active")
@@ -349,7 +356,7 @@ export function buildSeed(now: Date = new Date()): MockDb {
     drivers,
     cars,
     trips,
-    offers: [],
+    offers,
     commuteRoutes,
     feeInvoices,
     companyInvoices,

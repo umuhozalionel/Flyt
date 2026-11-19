@@ -1,6 +1,6 @@
 "use client"
 
-import { CarFront, ChartNoAxesCombined, Building2, IdCard, ListChecks, Radio } from "lucide-react"
+import { BadgeDollarSign, Briefcase, Building2, CarFront, ChartNoAxesCombined, FileText, IdCard, ListChecks, Presentation, Radio, Route, Settings, ShieldAlert, Users } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import type { ReactNode } from "react"
@@ -13,14 +13,28 @@ import { useT, type TranslationKey } from "@/lib/i18n"
 import { useLive } from "@/lib/use-live"
 import { OpsProvider, useOps, useToastMessage } from "./ops-context"
 
-const nav: { href: string; label: TranslationKey; icon: typeof Radio }[] = [
+/** platform: only platform admins see the screen; firm admins do not get it in the menu. */
+const nav: { href: string; label: TranslationKey; icon: typeof Radio; platform?: boolean }[] = [
   { href: "/ops", label: "ops.nav.overview", icon: ChartNoAxesCombined },
   { href: "/ops/dispatch", label: "ops.nav.dispatch", icon: Radio },
   { href: "/ops/trips", label: "ops.nav.trips", icon: ListChecks },
   { href: "/ops/firms", label: "ops.nav.firms", icon: Building2 },
   { href: "/ops/drivers", label: "ops.nav.drivers", icon: IdCard },
   { href: "/ops/cars", label: "ops.nav.cars", icon: CarFront },
+  { href: "/ops/riders", label: "ops.nav.riders", icon: Users, platform: true },
+  { href: "/ops/companies", label: "ops.nav.companies", icon: Briefcase, platform: true },
+  { href: "/ops/commutes", label: "ops.nav.commutes", icon: Route, platform: true },
+  { href: "/ops/pricing", label: "ops.nav.pricing", icon: BadgeDollarSign, platform: true },
+  { href: "/ops/invoices", label: "ops.nav.invoices", icon: FileText },
+  { href: "/ops/report", label: "ops.nav.report", icon: Presentation },
+  { href: "/ops/incidents", label: "ops.nav.incidents", icon: ShieldAlert },
+  { href: "/ops/settings", label: "ops.nav.settings", icon: Settings, platform: true },
 ]
+
+function useNav() {
+  const { isPlatform } = useOps()
+  return nav.filter((item) => isPlatform || !item.platform)
+}
 
 /** Flyt Operations layout: sidebar on desktop, scrolling tabs on small screens, and the demo role switcher. */
 export function OpsShell({ children }: { children: ReactNode }) {
@@ -47,14 +61,15 @@ function useActive() {
 function Sidebar() {
   const t = useT()
   const active = useActive()
+  const items = useNav()
   return (
     <aside className="sticky top-0 hidden h-screen flex-col border-r bg-sidebar p-4 lg:flex">
       <Link href="/" aria-label={t("common.homeLink")}>
         <Logo small />
       </Link>
       <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("ops.title")}</p>
-      <nav className="mt-6 flex flex-col gap-1" aria-label={t("ops.nav.label")}>
-        {nav.map(({ href, label, icon: Icon }) => (
+      <nav className="mt-6 flex flex-col gap-1 overflow-y-auto" aria-label={t("ops.nav.label")}>
+        {items.map(({ href, label, icon: Icon }) => (
           <Link key={href} href={href} aria-current={active(href) ? "page" : undefined} className={`flex min-h-10 items-center gap-3 rounded-xl px-3 text-sm font-medium ${active(href) ? "bg-primary text-primary-foreground" : "hover:bg-sidebar-accent"}`}>
             <Icon className="size-4" /> {t(label)}
           </Link>
@@ -68,6 +83,7 @@ function Sidebar() {
 function TopBar() {
   const t = useT()
   const active = useActive()
+  const items = useNav()
   const { admins, admin, setAdminId } = useOps()
   const { data: firms } = useLive(api.getFirms, ["firms"])
   const roleLabel = (id: string) => {
@@ -97,7 +113,7 @@ function TopBar() {
         </div>
       </div>
       <nav className="flex gap-1 overflow-x-auto px-3 pb-2 lg:hidden" aria-label={t("ops.nav.label")}>
-        {nav.map(({ href, label }) => (
+        {items.map(({ href, label }) => (
           <Link key={href} href={href} aria-current={active(href) ? "page" : undefined} className={`shrink-0 rounded-full px-3 py-2 text-sm font-medium ${active(href) ? "bg-primary text-primary-foreground" : "bg-secondary"}`}>
             {t(label)}
           </Link>

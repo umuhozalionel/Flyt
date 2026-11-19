@@ -67,7 +67,7 @@ export function OverviewScreen() {
                       {alert.ownerName} · {t(`doc.${alert.docType}` as TranslationKey)}
                     </Link>
                     <span className="shrink-0 text-xs text-muted-foreground">
-                      {alert.status === "missing" ? t("status.missing") : alert.daysLeft! < 0 ? t("ops.alerts.expiredAgo", { days: -alert.daysLeft! }) : t("ops.alerts.expiresIn", { days: alert.daysLeft! })}
+                      {alert.status === "missing" || alert.status === "rejected" ? t(`status.${alert.status}`) : alert.daysLeft! < 0 ? t("ops.alerts.expiredAgo", { days: -alert.daysLeft! }) : t("ops.alerts.expiresIn", { days: alert.daysLeft! })}
                     </span>
                   </li>
                 ))}

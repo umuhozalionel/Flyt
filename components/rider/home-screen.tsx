@@ -7,8 +7,10 @@ import { Skeleton } from "@/components/shared/skeleton"
 import { TripCard } from "@/components/shared/trip-card"
 import { useT } from "@/lib/i18n"
 import { placeName } from "@/lib/places"
-import { kigaliHour } from "@/lib/time"
+import { kigaliHour, partOfDay } from "@/lib/time"
 import type { PlaceId, Rider, Trip } from "@/lib/types"
+
+const greetings = { morning: "rider.home.goodMorning", afternoon: "rider.home.goodAfternoon", evening: "rider.home.goodEvening" } as const
 
 export function HomeScreen(props: {
   rider: Rider
@@ -26,7 +28,7 @@ export function HomeScreen(props: {
   return (
     <div className="animate-in fade-in duration-200">
       <div className="px-5 pb-5 pt-6">
-        <p className="text-sm text-muted-foreground">{kigaliHour() < 12 ? t("rider.home.goodMorning") : t("rider.home.goodAfternoon")}</p>
+        <p className="text-sm text-muted-foreground">{t(greetings[partOfDay(kigaliHour())])}</p>
         <h1 className="mt-1 text-3xl font-semibold tracking-tight">{t("rider.home.whereTo", { name: rider.name.split(" ")[0] })}</h1>
       </div>
       <div className="px-4">

@@ -29,6 +29,8 @@ export function BookScreen(props: {
   draft: BookingDraft
   setDraft: (update: Partial<BookingDraft>) => void
   quotes?: Partial<Record<TripType, OptionQuote>>
+  /** Minutes until the nearest free car reaches the pickup, per ride type. Missing type: no free car now. */
+  etas?: Partial<Record<TripType, number>>
   company?: Company
   routeName?: string
   offline: boolean
@@ -87,7 +89,7 @@ export function BookScreen(props: {
               <span className="min-w-0 flex-1">
                 <span className="block font-semibold">{t(label)}</span>
                 <span className="block text-xs text-muted-foreground">
-                  {t(detail, { rate: quote && "rate" in quote && quote.rate ? formatMoney(quote.rate) : "", company: company?.name ?? "" })} · {type === "airport" ? t("rider.book.eta", { min: 35 }) : t("rider.book.eta", { min: 12 })}
+                  {t(detail, { rate: quote && "rate" in quote && quote.rate ? formatMoney(quote.rate) : "", company: company?.name ?? "" })} · {!props.etas ? "…" : props.etas[type] != null ? t("rider.book.eta", { min: props.etas[type]! }) : t("rider.book.noCarNow")}
                 </span>
               </span>
               <span className="text-right font-bold">{!quote ? "…" : "error" in quote ? <span className="text-xs font-medium text-muted-foreground">{quote.error}</span> : formatMoney(quote.fare)}</span>
