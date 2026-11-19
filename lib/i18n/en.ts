@@ -1,0 +1,4 @@
+const en = { brand: "Flyt", tagline: "A better way around Kigali", welcome: "Move with confidence.", home: "Home", trips: "Trips", account: "Account", whereTo: "Where to?", pickup: "Pickup location", dropoff: "Where are you going?", confirmRide: "Confirm ride", now: "Now", schedule: "Schedule", private: "Private", airport: "Airport", hourly: "Hourly", daily: "Daily", sharedCommute: "Shared commute", payment: "Payment method", firm: "Licensed partner", licence: "RURA licence", taxNote: "Tax: per EBM receipt", companyAccount: "Company account", findCar: "Find a car", noConnection: "No connection. Your trip details are saved on this device.", help: "Help & support" } as const
+export type TranslationKey = keyof typeof en
+export const translations = { en, rw: {} as Partial<Record<TranslationKey, string>>, fr: {} as Partial<Record<TranslationKey, string>> }
+export default en
