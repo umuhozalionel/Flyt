@@ -7,8 +7,9 @@ import { supportEmail } from "@/lib/config"
 import { formatPhone, initials } from "@/lib/format"
 import { languages, useLanguage, useT } from "@/lib/i18n"
 import type { Car, Driver, Firm, Language } from "@/lib/types"
+import { DriverPreferencesCard, TipSettingsCard } from "./driver-settings"
 
-export function DriverProfileScreen({ driver, car, firm, onSignOut }: { driver: Driver; car?: Car; firm?: Firm; onSignOut: () => void }) {
+export function DriverProfileScreen({ driver, car, firm, onSignOut, toast }: { driver: Driver; car?: Car; firm?: Firm; onSignOut: () => void; toast: (message: string) => void }) {
   const t = useT()
   const { language, setLanguage } = useLanguage()
   return (
@@ -37,6 +38,8 @@ export function DriverProfileScreen({ driver, car, firm, onSignOut }: { driver: 
           <p className="mt-1 text-muted-foreground">{t("driver.profile.noCar")}</p>
         )}
       </section>
+      <DriverPreferencesCard driver={driver} toast={toast} />
+      <TipSettingsCard driver={driver} firm={firm} toast={toast} />
       <section className="mt-3 flex flex-col gap-3 rounded-2xl border bg-card p-4 text-sm">
         <label htmlFor="driver-language" className="font-semibold">
           {t("driver.profile.language")}

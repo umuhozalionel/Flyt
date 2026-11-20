@@ -3,5 +3,6 @@ import { defineConfig } from "vitest/config"
 
 export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./", import.meta.url)) } },
-  test: { include: ["tests/**/*.test.ts"], environment: "node", env: { TZ: "UTC" } },
+  // tests/db needs a running local Supabase: run it with pnpm test:db.
+  test: { include: ["tests/**/*.test.ts"], exclude: ["tests/db/**", "node_modules/**"], environment: "node", env: { TZ: "UTC" } },
 })

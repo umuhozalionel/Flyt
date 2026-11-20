@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#008e53">
+<title>Flyt is offline</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f8faf6; --fg: #17211c; --muted: #5f6f66; --card: #ffffff; --primary: #008e53; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #151c18; --fg: #eef3ec; --muted: #a7b5ad; --card: #1d2620; --primary: #3db87c; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { width: 100%; max-width: 380px; text-align: center; }
+  .mark { width: 64px; height: 64px; margin: 0 auto 20px; border-radius: 18px; background: var(--primary); display: grid; place-items: center; }
+  h1 { margin: 0 0 8px; font-size: 24px; }
+  p { margin: 0 0 20px; color: var(--muted); }
+  button { min-height: 48px; width: 100%; border: 0; border-radius: 14px; background: var(--primary); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  .note { margin-top: 16px; padding: 12px 14px; border-radius: 14px; background: var(--card); font-size: 14px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <div class="mark" aria-hidden="true"><svg width="34" height="34" viewBox="0 0 180 180"><polygon points="90,39.6 127.1,140.4 90,119.2 52.9,140.4" fill="#fff" stroke="#fff" stroke-width="6" stroke-linejoin="round"/></svg></div>
+  <h1>You are offline</h1>
+  <p>Flyt needs a connection to book or follow a ride. Check your mobile data or Wi-Fi.</p>
+  <button type="button" onclick="location.reload()">Try again</button>
+  <p class="note">In an emergency, call the police on 112.</p>
+</main>
+<script>window.addEventListener("online", function () { location.reload() })</script>
+</body>
+</html>

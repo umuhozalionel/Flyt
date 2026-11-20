@@ -35,6 +35,8 @@ export function BookScreen(props: {
   routeName?: string
   offline: boolean
   busy: boolean
+  /** Not signed in yet: booking asks for the phone number first. */
+  signedOut?: boolean
   onConfirm: () => void
 }) {
   const t = useT()
@@ -50,7 +52,7 @@ export function BookScreen(props: {
     <label className={`flex items-center gap-3 ${bordered ? "border-b pb-3" : "pt-3"}`}>
       <span className={`size-2.5 rounded-full ${dot}`} />
       <span className="w-16 text-xs uppercase text-muted-foreground">{t(label)}</span>
-      <select aria-label={t(label)} value={value} onChange={(event) => onChange(event.target.value as PlaceId)} className="min-w-0 flex-1 bg-transparent py-2 text-sm font-medium outline-none">
+      <select aria-label={t(label)} value={value} onChange={(event) => onChange(event.target.value as PlaceId)} className="min-w-0 flex-1 appearance-none bg-transparent py-2 text-sm font-medium outline-none">
         {places.map((place) => (
           <option key={place.id} value={place.id}>
             {place.name}
@@ -62,7 +64,7 @@ export function BookScreen(props: {
   )
 
   return (
-    <div className="px-5 pb-32 pt-5">
+    <div className="px-5 pt-3">
       <h1 className="text-2xl font-semibold">{t("rider.book.title")}</h1>
       <p className="mt-1 text-sm text-muted-foreground">{t("rider.book.fixedNote")}</p>
       <div className="mt-5 rounded-2xl border bg-card p-4">
@@ -153,10 +155,12 @@ export function BookScreen(props: {
           <WifiOff className="size-4 shrink-0" /> {t("common.offlineBook")}
         </p>
       )}
-      <Button onClick={props.onConfirm} disabled={busy || props.offline || !selected || "error" in selected} className="mt-5 min-h-14 w-full rounded-2xl text-base">
-        {busy ? t("rider.book.finding") : selected && !("error" in selected) ? t("rider.book.confirm", { fare: formatMoney(selected.fare) }) : t("rider.book.confirmPlain")}
-      </Button>
-      <p className="mt-3 text-center text-xs text-muted-foreground">{t("rider.book.payDirect")}</p>
+      <div className="sticky bottom-0 -mx-5 mt-4 border-t bg-background/95 px-5 pb-4 pt-3 backdrop-blur">
+        <Button onClick={props.onConfirm} disabled={busy || props.offline || !selected || "error" in selected} className="min-h-14 w-full rounded-2xl text-base">
+          {busy ? t("rider.book.finding") : selected && !("error" in selected) ? t("rider.book.confirm", { fare: formatMoney(selected.fare) }) : t("rider.book.confirmPlain")}
+        </Button>
+        <p className="mt-2 text-center text-xs text-muted-foreground">{props.signedOut ? t("rider.book.signInNote") : t("rider.book.payDirect")}</p>
+      </div>
     </div>
   )
 }

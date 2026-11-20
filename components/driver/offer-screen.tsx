@@ -1,12 +1,16 @@
 "use client"
 
 import { MapPin, Star, UserRound } from "lucide-react"
+import { motion } from "motion/react"
+import { useEffect } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { DriverJob } from "@/lib/api"
 import { offerSeconds } from "@/lib/config"
 import { kmBetween, pickupMinutes } from "@/lib/eta"
 import { formatMoney } from "@/lib/format"
+import { haptic } from "@/lib/haptics"
+import { playOfferSound } from "@/lib/push"
 import { useT, type TranslationKey } from "@/lib/i18n"
 import { placeName } from "@/lib/places"
 import type { Driver } from "@/lib/types"
@@ -17,9 +21,14 @@ export function OfferScreen({ job, driver, secondsLeft, busy, onAccept, onDeclin
   const { trip, rider } = job
   const km = kmBetween(driver.zone, trip.pickup)
   const hire = trip.type === "hourly" || trip.type === "daily"
+  // A chime and a vibration when the offer appears (the phone may block sound until the app was tapped once).
+  useEffect(() => {
+    playOfferSound()
+    haptic("offer")
+  }, [trip.id])
   return (
     <div className="fixed inset-0 z-40 flex justify-center bg-background">
-      <section role="dialog" aria-modal="true" aria-labelledby="offer-heading" className="flex w-full max-w-[430px] flex-col px-5 pb-6 pt-8">
+      <motion.section initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 380, damping: 32 }} role="dialog" aria-modal="true" aria-labelledby="offer-heading" className="flex w-full max-w-[430px] flex-col px-5 pb-6 pt-8">
         <div className="flex items-center justify-between">
           <h1 id="offer-heading" className="text-2xl font-semibold">
             {t("driver.offer.title")}
@@ -68,7 +77,7 @@ export function OfferScreen({ job, driver, secondsLeft, busy, onAccept, onDeclin
             {busy ? t("common.saving") : t("driver.offer.accept")}
           </Button>
         </div>
-      </section>
+      </motion.section>
     </div>
   )
 }

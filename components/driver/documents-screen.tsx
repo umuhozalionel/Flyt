@@ -6,15 +6,16 @@ import { DocumentBadge } from "@/components/shared/status-badge"
 import { Button } from "@/components/ui/button"
 import { Dialog } from "@/components/ui/dialog"
 import { Field, Input } from "@/components/ui/input"
+import * as api from "@/lib/api"
 import { documentStatus } from "@/lib/documents"
 import { useT, type TranslationKey } from "@/lib/i18n"
 import type { Car, DocumentType, Driver } from "@/lib/types"
 
-export function DocumentsScreen({ driver, car, busy, onSubmit }: { driver: Driver; car?: Car; busy: boolean; onSubmit: (type: DocumentType, expiryDate: string) => Promise<boolean> }) {
+export function DocumentsScreen({ driver, car, busy, onSubmit }: { driver: Driver; car?: Car; busy: boolean; onSubmit: (type: DocumentType, expiryDate: string, file?: File) => Promise<boolean> }) {
   const t = useT()
   const [open, setOpen] = useState<DocumentType>()
   const [expiry, setExpiry] = useState("")
-  const [file, setFile] = useState("")
+  const [file, setFile] = useState<File>()
   return (
     <div className="px-5 pb-8 pt-6">
       <h1 className="text-2xl font-semibold">{t("driver.docs.title")}</h1>
@@ -40,7 +41,7 @@ export function DocumentsScreen({ driver, car, busy, onSubmit }: { driver: Drive
                 onClick={() => {
                   setOpen(doc.type)
                   setExpiry("")
-                  setFile("")
+                  setFile(undefined)
                 }}
               >
                 <Upload className="size-4" /> {t("driver.docs.upload")}
@@ -65,16 +66,16 @@ export function DocumentsScreen({ driver, car, busy, onSubmit }: { driver: Drive
         </>
       )}
       {open && (
-        <Dialog title={t("driver.docs.uploadTitle", { doc: t(`doc.${open}` as TranslationKey) })} description={t("driver.docs.mockNote")} onClose={() => setOpen(undefined)} closeLabel={t("common.close")}>
+        <Dialog title={t("driver.docs.uploadTitle", { doc: t(`doc.${open}` as TranslationKey) })} description={api.isDemoData ? t("driver.docs.mockNote") : t("driver.docs.privateNote")} onClose={() => setOpen(undefined)} closeLabel={t("common.close")}>
           <form
             className="flex flex-col gap-3"
             onSubmit={(event) => {
               event.preventDefault()
-              void onSubmit(open, expiry).then((ok) => ok && setOpen(undefined))
+              void onSubmit(open, expiry, file).then((ok) => ok && setOpen(undefined))
             }}
           >
             <Field id="doc-file" label={t("driver.docs.file")}>
-              <Input id="doc-file" type="file" accept="image/*,application/pdf" required onChange={(event) => setFile(event.target.files?.[0]?.name ?? "")} className="py-2" />
+              <Input id="doc-file" type="file" accept="image/*,application/pdf" required onChange={(event) => setFile(event.target.files?.[0])} className="py-2" />
             </Field>
             {open !== "national_id" && (
               <Field id="doc-expiry" label={t("driver.docs.expiry")}>

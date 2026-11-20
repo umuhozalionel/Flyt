@@ -7,7 +7,7 @@ import { Field, Input, Select } from "@/components/ui/input"
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table"
 import * as api from "@/lib/api"
 import { nextInvoiceStatus } from "@/lib/invoices"
-import { formatMoney } from "@/lib/format"
+import { formatMoney, formatMoneyChange } from "@/lib/format"
 import { useT, type TranslationKey } from "@/lib/i18n"
 import { kigaliMonth } from "@/lib/time"
 import type { InvoiceStatus } from "@/lib/types"
@@ -119,7 +119,10 @@ export function InvoicesScreen() {
                   <Tr key={invoice.id}>
                     <Td className="font-mono text-xs">{invoice.id}</Td>
                     <Td>{invoice.period}</Td>
-                    <Td>{firmName(invoice.firmId)}</Td>
+                    <Td>
+                      {firmName(invoice.firmId)}
+                      {invoice.adjustments.length > 0 && <span className="block text-xs text-muted-foreground">{t("ops.invoices.adjustments", { count: invoice.adjustments.length, fare: formatMoneyChange(invoice.adjustments.reduce((sum, row) => sum + row.fare, 0)), fee: formatMoneyChange(invoice.adjustments.reduce((sum, row) => sum + row.fee, 0)) })}</span>}
+                    </Td>
                     <Td className="text-right tabular-nums">{invoice.tripCount}</Td>
                     <Td className="text-right tabular-nums">{formatMoney(invoice.faresTotal)}</Td>
                     <Td className="text-right font-semibold tabular-nums">{formatMoney(invoice.feeTotal)}</Td>
@@ -159,7 +162,10 @@ export function InvoicesScreen() {
                     <Tr key={invoice.id}>
                       <Td className="font-mono text-xs">{invoice.id}</Td>
                       <Td>{invoice.period}</Td>
-                      <Td>{companyName(invoice.companyId)}</Td>
+                      <Td>
+                        {companyName(invoice.companyId)}
+                        {invoice.adjustments.length > 0 && <span className="block text-xs text-muted-foreground">{t("ops.invoices.adjustmentsCompany", { count: invoice.adjustments.length, fare: formatMoneyChange(invoice.adjustments.reduce((sum, row) => sum + row.fare, 0)) })}</span>}
+                      </Td>
                       <Td className="text-right tabular-nums">{invoice.tripCount}</Td>
                       <Td className="text-right font-semibold tabular-nums">{formatMoney(invoice.total)}</Td>
                       <Td>

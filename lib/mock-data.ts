@@ -2,7 +2,18 @@ import { offerSeconds } from "./config"
 import { companyInvoiceFor, feeInvoiceFor } from "./invoices"
 import { fareSplit, quoteFare } from "./pricing"
 import { addDays, kigaliDay, kigaliMonth, previousMonth } from "./time"
+import { defaultSettings } from "./additions"
 import type {
+  AppNotification,
+  AppSettings,
+  BonusTarget,
+  ChatMessage,
+  DriverPreferences,
+  FavouriteDriver,
+  LostItem,
+  NotificationType,
+  PushSubscriptionInput,
+  Tip,
   AdminUser,
   Car,
   CommuteRoute,
@@ -47,9 +58,30 @@ export interface MockDb {
   incidents: Incident[]
   pricing: PricingConfig
   admins: AdminUser[]
+  // Phase 6B additions
+  pins: Record<string, { pin: string; wrongTries: number }>
+  /** Notifications with who they are for ("rider:rider-1", "driver:driver-2", "admin:admin-1"). */
+  notifications: (AppNotification & { to: string })[]
+  mutes: Record<string, NotificationType[]>
+  pushSubscriptions: (PushSubscriptionInput & { to: string })[]
+  chat: ChatMessage[]
+  favourites: FavouriteDriver[]
+  preferences: DriverPreferences[]
+  shares: { token: string; tripId: string; revokedAt?: string }[]
+  lostItems: LostItem[]
+  bonusTargets: BonusTarget[]
+  settings: AppSettings
+  tips: Tip[]
 }
 
-export const SEED_VERSION = 3
+/** A fixed 4-digit PIN for each seeded trip, so the demo is the same every time. */
+export function seedPin(tripId: string) {
+  let hash = 0
+  for (const char of tripId) hash = (hash * 31 + char.charCodeAt(0)) % 10_000
+  return String(hash).padStart(4, "0")
+}
+
+export const SEED_VERSION = 5
 /** Days since the pilot started when the seed is built. Weeks 1 to 4 use Baseline, weeks 5 to 8 use Test. */
 export const PILOT_DAY = 33
 export const TEST_PLAN_FROM_DAY = 28
@@ -242,6 +274,8 @@ export function buildSeed(now: Date = new Date()): MockDb {
     { day: 0, hour: 9, min: 5, type: "private", status: "scheduled", rider: 10, from: "kacyiru", to: "airport", pay: "company_account" },
   ]
 
+  // Pickup waits in minutes, used in turn (the offer is accepted at minute 3, so each is 5 or more).
+  const pickupWaits = [6, 8, 11, 7, 13, 9, 5, 10, 14, 7, 12, 6, 9, 16, 8]
   const tripStatusesWithDriver: TripStatus[] = ["assigned", "driver_arriving", "driver_arrived", "in_progress", "completed", "cancelled_by_driver"]
   const hireFirm = firms[1]
   let receiptSeq = 0
@@ -258,6 +292,8 @@ export function buildSeed(now: Date = new Date()): MockDb {
     const paymentMethod: PaymentMethod = spec.type === "shared_commute" ? "company_account" : spec.pay ?? "momo"
     if (paymentMethod === "company_account" && !rider.companyId) throw new Error(`Seed trip ${i}: company billing needs a company rider`)
     const created = kigaliAt(day, spec.hour, spec.min ?? 0)
+    // Minutes from booking to the driver arriving. Varied so the report's average wait is realistic.
+    const wait = pickupWaits[i % pickupWaits.length]
     const at = (minutes: number) => new Date(created.getTime() + minutes * MIN).toISOString()
     const rideMinutes = spec.type === "hourly" ? (spec.qty ?? 1) * 60 : spec.type === "daily" ? (spec.qty ?? 1) * 600 : Math.ceil(quote.distanceKm * 2.5) + 4
     const reached = (status: TripStatus) => {
@@ -269,7 +305,7 @@ export function buildSeed(now: Date = new Date()): MockDb {
     const scheduledFor = spec.status === "scheduled" ? kigaliAt(inDays(1), spec.hour - 1).toISOString() : undefined
     const paymentStatus: Trip["paymentStatus"] =
       paymentMethod === "company_account" ? "billed_to_company" : completed ? (spec.payState === "failed" ? "failed" : spec.payState === "rider_paid" ? "pending" : "paid") : "pending"
-    const completedAt = completed ? at(10 + rideMinutes) : undefined
+    const completedAt = completed ? at(wait + 1 + rideMinutes) : undefined
     const trip: Trip = {
       id: `FLT-${2400 + i}`,
       type: spec.type,
@@ -297,15 +333,15 @@ export function buildSeed(now: Date = new Date()): MockDb {
       cancelledBy: spec.status === "cancelled_by_rider" ? "rider" : spec.status === "cancelled_by_driver" ? "driver" : spec.status === "no_driver_found" ? "system" : undefined,
       commuteRouteId: spec.route,
       createdAt: created.toISOString(),
-      updatedAt: completedAt ?? (cancelled ? at(spec.status === "cancelled_by_driver" ? 6 : 4) : at(reached("in_progress") ? 10 : reached("driver_arrived") ? 9 : reached("driver_arriving") ? 3 : reached("assigned") ? 2 : 0)),
+      updatedAt: completedAt ?? (cancelled ? at(spec.status === "cancelled_by_driver" ? 6 : 4) : at(reached("in_progress") ? wait + 1 : reached("driver_arrived") ? wait : reached("driver_arriving") ? 3 : reached("assigned") ? 2 : 0)),
       assignedAt: reached("assigned") || spec.status === "cancelled_by_driver" ? at(2) : undefined,
       acceptedAt: reached("driver_arriving") || spec.status === "cancelled_by_driver" ? at(3) : undefined,
-      arrivedAt: reached("driver_arrived") ? at(9) : undefined,
-      startedAt: reached("in_progress") ? at(10) : undefined,
+      arrivedAt: reached("driver_arrived") ? at(wait) : undefined,
+      startedAt: reached("in_progress") ? at(wait + 1) : undefined,
       completedAt,
       cancelledAt: cancelled ? at(spec.status === "cancelled_by_driver" ? 6 : 4) : undefined,
-      riderPaidAt: completed && paymentMethod !== "company_account" && spec.payState !== "failed" ? at(12 + rideMinutes) : undefined,
-      paidAt: paymentStatus === "paid" ? at(14 + rideMinutes) : undefined,
+      riderPaidAt: completed && paymentMethod !== "company_account" && spec.payState !== "failed" ? at(wait + 3 + rideMinutes) : undefined,
+      paidAt: paymentStatus === "paid" ? at(wait + 5 + rideMinutes) : undefined,
     }
     return trip
   })
@@ -363,5 +399,22 @@ export function buildSeed(now: Date = new Date()): MockDb {
     incidents,
     pricing: plans(planOn(today)),
     admins,
+    pins: Object.fromEntries(trips.map((trip) => [trip.id, { pin: seedPin(trip.id), wrongTries: 0 }])),
+    notifications: [],
+    mutes: {},
+    pushSubscriptions: [],
+    chat: [],
+    favourites: [],
+    preferences: [],
+    shares: [],
+    lostItems: [],
+    // An example target, inactive: bonuses are off until Ops turns them on. Tracking only, nothing is paid.
+    bonusTargets: [{ id: "bonus-weekly-40", name: "40 trips this week", metric: "completed_trips", period: "week", target: 40, active: false, createdAt: seededAt(now) }],
+    settings: { ...defaultSettings },
+    tips: [],
   }
+}
+
+function seededAt(now: Date) {
+  return now.toISOString()
 }

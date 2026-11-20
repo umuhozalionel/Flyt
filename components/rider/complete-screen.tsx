@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { formatMoney } from "@/lib/format"
 import { useT } from "@/lib/i18n"
 import type { Company, Rider } from "@/lib/types"
+import { TripExtras } from "./trip-extras"
 import type { TripAssignment } from "./types"
 
 const ratingTags = ["rider.rate.friendly", "rider.rate.smooth", "rider.rate.onTime"] as const
@@ -105,6 +106,7 @@ export function CompleteScreen(props: {
           )}
         </div>
       )}
+      <TripExtras assignment={props.assignment} rider={props.rider} toast={props.toast} />
       <div className="mt-6">
         <h2 className="text-center font-semibold">{t("rider.rate.title")}</h2>
         <div className="mt-3 flex justify-center gap-2" role="radiogroup" aria-label={t("rider.rate.label")}>

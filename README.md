@@ -18,11 +18,12 @@ This repository contains the Flyt web application: the rider app, and the founda
 | --- | --- | --- |
 | Start page | `/` | Built |
 | Rider app | `/rider` | Built |
-| Operations dashboard | `/ops` | In development |
-| Driver app | `/driver` | In development |
-| Company portal | `/company` | In development |
+| Operations dashboard | `/ops` | Built |
+| Driver app | `/driver` | Built |
+| Company portal | `/company` | Built |
+| Live trip sharing page | `/share` | Built |
 
-All data is currently sample data served through a local data layer. Payments, sign-in and maps are simulated.
+Two data sources: sample data in the browser (`mock`, the default) or Supabase (`supabase`, local CLI for now). Riders pay the firm directly by MoMo or Airtel Money; Flyt never holds rider money.
 
 ## Tech stack
 
@@ -31,6 +32,9 @@ All data is currently sample data served through a local data layer. Payments, s
 - Tailwind CSS 4
 - shadcn/ui components on Base UI
 - lucide-react icons
+- MapLibre GL with OpenFreeMap map styles (free, no key), behind `components/shared/map-view.tsx`
+- motion (screen and sheet animation), vaul (draggable sheets), Inter from @fontsource (self-hosted)
+- Supabase (Postgres, auth, realtime, storage) for the backend
 - pnpm
 
 ## Getting started
@@ -60,10 +64,33 @@ Open [http://localhost:3000](http://localhost:3000).
 | `pnpm lint` | Run ESLint |
 | `pnpm test` | Run the Vitest tests (fare engine, seed data, data store) |
 | `pnpm check` | Typecheck, lint, test and build in one go |
+| `pnpm test:db` | Database tests against the local Supabase (reset it first: they change data) |
+| `pnpm cloud:check` | Refuses settings that must never reach a cloud project (the test SMS code, dev sign-in) |
+| `pnpm cloud:config-push` | Runs `cloud:check`, then `supabase config push`. Never run `supabase config push` on its own |
 
 ### Data source
 
-Copy `.env.example` to `.env.local`. `NEXT_PUBLIC_DATA_SOURCE=mock` (the default) runs the demo in the browser with sample data; changes show at once in every open tab. `supabase` uses the Supabase backend (in development).
+Copy `.env.example` to `.env.local`. `NEXT_PUBLIC_DATA_SOURCE=mock` (the default) runs the demo in the browser with sample data; changes show at once in every open tab. `supabase` uses the Supabase backend.
+
+### Supabase (local)
+
+```bash
+npx supabase start          # prints the local URL and anon key for .env.local
+npx supabase db reset       # applies supabase/migrations and supabase/seed.sql
+npx supabase test db        # pgTAP tests (row level security and the trip flow)
+```
+
+- Money (fares, platform fees, invoice totals) and every trip status change are worked out in Postgres functions, never taken from the browser.
+- The test SMS code `123456` works only on the local CLI. `pnpm cloud:check` blocks it, and dev email sign-in, from a cloud project.
+- Browser notifications use free Web Push with VAPID keys. Make a pair with `npx web-push generate-vapid-keys`. The public key goes in `NEXT_PUBLIC_VAPID_PUBLIC_KEY`; the private key goes only in `supabase/functions/.env` (see `supabase/functions/.env.example`). The `push` edge function sends them; a trigger calls it when a notification is saved.
+
+### Maps
+
+The map style URLs come from `NEXT_PUBLIC_MAP_STYLE_URL` and `NEXT_PUBLIC_MAP_STYLE_DARK_URL` (OpenFreeMap "liberty" and "dark" by default). If the style or tiles fail to load, the map switches to a plain built-in map of our places, so booking still works. Routes are straight lines between places and distances come from the table in `lib/places.ts`: no paid routing. In version 1 drivers share their zone, not GPS, so cars are drawn moving slowly around their zone. MapLibre's worker file is copied into `public/vendor` on install, dev and build (`scripts/copy-map-worker.mjs`).
+
+### Installable
+
+`app/manifest.ts` (served at `/manifest.webmanifest`), the icons in `public/icons`, and one service worker (`public/sw.js`) for notifications, cached app files and the offline page (`public/offline.html`). The service worker is registered in production builds only.
 
 ## Project structure
 
@@ -125,8 +152,10 @@ One plan is active at a time. Amounts are shown in Rwandan francs without decima
 2. Driver app: job offers, trip flow, earnings and documents
 3. Operations dashboard: riders, companies, shared commutes, pricing, invoices, pilot report, incidents and settings
 4. Company portal: staff, trips, invoices and commute routes
-5. Backend, authentication and live maps
-6. iOS and Android apps
+5. Backend, authentication and live maps (local Supabase; cloud before the pilot)
+6. Riders and drivers extras: notifications, trip PIN, chat, favourites, sharing, lost and found, tips and points
+7. Map first, motion and installable web app
+8. iOS and Android apps
 
 ## License
 

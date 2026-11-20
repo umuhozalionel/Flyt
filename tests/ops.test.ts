@@ -90,8 +90,8 @@ describe("scope and money", () => {
     const trip = (id: string, completedAt: string, fare: number, platformFee: number) => ({ id, firmId: "firm-1", status: "completed", completedAt, fare, platformFee }) as Trip
     const trips = [trip("a", "2026-11-03T08:00:00Z", 4200, 504), trip("b", "2026-11-10T08:00:00Z", 2700, 324), trip("c", "2026-10-20T08:00:00Z", 9000, 1080)]
     const invoices: FeeInvoice[] = [
-      { id: "i1", firmId: "firm-1", period: "2026-10", tripCount: 1, faresTotal: 9000, feeTotal: 1080, status: "sent" },
-      { id: "i2", firmId: "firm-1", period: "2026-09", tripCount: 1, faresTotal: 5000, feeTotal: 600, status: "paid" },
+      { id: "i1", firmId: "firm-1", period: "2026-10", tripCount: 1, faresTotal: 9000, feeTotal: 1080, status: "sent", lines: [], adjustments: [] },
+      { id: "i2", firmId: "firm-1", period: "2026-09", tripCount: 1, faresTotal: 5000, feeTotal: 600, status: "paid", lines: [], adjustments: [] },
     ]
     // 1,080 unpaid + (504 + 324 = 828) this month = 1,908
     expect(feesOwed({ id: "firm-1" }, trips, invoices, NOW)).toEqual({ invoiced: 1080, thisMonth: 828, total: 1908 })

@@ -13,6 +13,7 @@ import { useT, type TranslationKey } from "@/lib/i18n"
 import type { AdminRole, AdminUser } from "@/lib/types"
 import { useLive } from "@/lib/use-live"
 import { errorText, useOps } from "./ops-context"
+import { AdditionsSettings } from "./additions-settings"
 import { useOpsData } from "./ops-data"
 import { Card, LoadError, Loading, PageHeader, PlatformOnly } from "./ops-ui"
 
@@ -91,6 +92,7 @@ export function SettingsScreen() {
         </Table>
         <p className="mt-3 text-xs text-muted-foreground">{t("ops.settings.rolesNote")}</p>
       </Card>
+      <AdditionsSettings firms={data.allFirms} />
       {adding && <AddMemberDialog firms={data.allFirms} companies={data.companies} onClose={() => setAdding(false)} />}
       {removing && (
         <Dialog title={t("ops.settings.removeTitle", { name: removing.name })} description={t("ops.settings.removeDetail")} onClose={() => setRemoving(undefined)} closeLabel={t("common.close")}>

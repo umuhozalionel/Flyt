@@ -8,7 +8,8 @@ import { formatDate, formatMoney, initials } from "@/lib/format"
 import { useT, type TranslationKey } from "@/lib/i18n"
 import { placeName } from "@/lib/places"
 import { activeStatuses } from "@/lib/trip-rules"
-import type { Trip } from "@/lib/types"
+import type { Rider, Trip } from "@/lib/types"
+import { TripExtras } from "./trip-extras"
 import type { TripAssignment } from "./types"
 
 const timeline: { key: keyof Trip; label: TranslationKey }[] = [
@@ -21,7 +22,7 @@ const timeline: { key: keyof Trip; label: TranslationKey }[] = [
   { key: "cancelledAt", label: "rider.detail.cancelledAt" },
 ]
 
-export function TripDetailScreen(props: { assignment: TripAssignment; companyName?: string; onLive: () => void; onReceipt: () => void; onPay: () => void; onCancel: () => void }) {
+export function TripDetailScreen(props: { assignment: TripAssignment; rider?: Rider; toast: (message: string) => void; companyName?: string; onLive: () => void; onReceipt: () => void; onPay: () => void; onCancel: () => void }) {
   const t = useT()
   const { trip, driver, car, firm } = props.assignment
   const live = activeStatuses.includes(trip.status)
@@ -125,6 +126,7 @@ export function TripDetailScreen(props: { assignment: TripAssignment; companyNam
           </button>
         )}
       </div>
+      {props.rider && <TripExtras assignment={props.assignment} rider={props.rider} toast={props.toast} />}
     </div>
   )
 }

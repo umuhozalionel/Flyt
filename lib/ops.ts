@@ -3,7 +3,8 @@ import { feeInvoiceFor } from "./invoices"
 import { kmBetween } from "./eta"
 import { daysBetween, kigaliDay, kigaliMonth } from "./time"
 import { activeStatuses } from "./trip-rules"
-import type { AdminUser, Car, ComplianceDocument, DocumentStatus, DocumentType, Driver, FeeInvoice, Firm, Incident, PlaceId, Trip } from "./types"
+import { headingHome, preferencesOf, prefsAllow } from "./additions"
+import type { AdminUser, Car, ComplianceDocument, DocumentStatus, DocumentType, Driver, DriverPreferences, FavouriteDriver, FeeInvoice, Firm, Incident, PlaceId, Trip } from "./types"
 
 // Figures and rules for the Flyt Operations dashboard. Pure functions, so tests can check every number.
 
@@ -98,7 +99,10 @@ export function unassignedRequests(trips: Trip[], now: Date = new Date()): Trip[
 
 export const openIncidents = (incidents: Incident[]) => incidents.filter((incident) => incident.status !== "closed")
 
-export interface DriverSuggestion { driver: Driver; car: Car; firm: Firm; km: number }
+export interface DriverSuggestion { driver: Driver; car: Car; firm: Firm; km: number; favourite?: boolean; headingHome?: boolean }
+
+/** Driver preferences and the rider's favourites, used to shape suggestions (Phase 6B). */
+export interface SuggestionExtras { preferences?: DriverPreferences[]; favourites?: FavouriteDriver[]; now?: number }
 
 /** Road km from a driver's zone to the pickup. 0 when they are in the same place. */
 export function kmToPickup(zone: PlaceId, pickup: PlaceId) {
@@ -108,8 +112,11 @@ export function kmToPickup(zone: PlaceId, pickup: PlaceId) {
 /**
  * Drivers who can take a trip now, nearest first (then best rated). The same checks run when
  * Ops assigns: approved, online, has an available car, firm active, and hire trips stay with the booked firm.
+ * Suggestions also respect each driver's ride types and heading-home area, and on a scheduled ride the
+ * rider's favourite drivers come first. Ops still assigns by hand.
  */
-export function suggestDrivers(trip: Trip, drivers: Driver[], cars: Car[], firms: Firm[], scope: OpsScope = {}, limit = 3): DriverSuggestion[] {
+export function suggestDrivers(trip: Trip, drivers: Driver[], cars: Car[], firms: Firm[], scope: OpsScope = {}, limit = 3, extras: SuggestionExtras = {}): DriverSuggestion[] {
+  const now = extras.now ?? Date.now()
   const hire = trip.type === "hourly" || trip.type === "daily"
   const rows: DriverSuggestion[] = []
   for (const driver of drivers) {
@@ -119,9 +126,13 @@ export function suggestDrivers(trip: Trip, drivers: Driver[], cars: Car[], firms
     const car = cars.find((item) => item.id === driver.carId)
     const firm = firms.find((item) => item.id === driver.firmId)
     if (!car || car.availability !== "available" || !firm || firm.status !== "active") continue
-    rows.push({ driver, car, firm, km: kmToPickup(driver.zone, trip.pickup) })
+    const prefs = preferencesOf(driver.id, extras.preferences ?? [])
+    if (!prefsAllow(trip, prefs, now)) continue
+    const favourite = (extras.favourites ?? []).some((item) => item.riderId === trip.riderId && item.driverId === driver.id)
+    rows.push({ driver, car, firm, km: kmToPickup(driver.zone, trip.pickup), favourite, headingHome: headingHome(prefs, now) })
   }
-  return rows.sort((a, b) => a.km - b.km || b.driver.rating - a.driver.rating).slice(0, limit)
+  const favouriteFirst = trip.status === "scheduled"
+  return rows.sort((a, b) => (favouriteFirst ? Number(!!b.favourite) - Number(!!a.favourite) : 0) || a.km - b.km || b.driver.rating - a.driver.rating).slice(0, limit)
 }
 
 export interface FeesOwed {

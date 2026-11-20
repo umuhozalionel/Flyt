@@ -1,11 +1,15 @@
 "use client"
 
 import { useState } from "react"
+import { DevSignIn } from "@/components/shared/dev-sign-in"
 import { Button } from "@/components/ui/button"
+import * as api from "@/lib/api"
 import { normalizePhone } from "@/lib/format"
 import { useT } from "@/lib/i18n"
 
-export function SignInScreen({ busy, onSubmit, toast }: { busy: boolean; onSubmit: (input: { phone: string; name: string; consent: boolean; joinCode?: string }) => void; toast: (message: string) => void }) {
+type SignInInput = { phone: string; code: string; name: string; consent: boolean; joinCode?: string }
+
+export function SignInScreen({ busy, onSubmit, toast }: { busy: boolean; onSubmit: (input: SignInInput) => void; toast: (message: string) => void }) {
   const t = useT()
   const [phone, setPhone] = useState("")
   const [code, setCode] = useState("")
@@ -17,7 +21,7 @@ export function SignInScreen({ busy, onSubmit, toast }: { busy: boolean; onSubmi
   function submit() {
     if (!normalizePhone(phone)) return toast(t("rider.signin.invalidPhone"))
     if (code.length !== 6) return toast(t("rider.signin.invalidCode"))
-    onSubmit({ phone, name, consent, joinCode: showCode && joinCode.trim() ? joinCode.trim() : undefined })
+    onSubmit({ phone, code, name, consent, joinCode: showCode && joinCode.trim() ? joinCode.trim() : undefined })
   }
 
   return (
@@ -31,7 +35,7 @@ export function SignInScreen({ busy, onSubmit, toast }: { busy: boolean; onSubmi
         <span className="flex items-center border-r px-3 text-sm text-muted-foreground">+250</span>
         <input id="phone" inputMode="tel" autoComplete="tel-national" placeholder="78 000 0000" value={phone} onChange={(event) => setPhone(event.target.value)} className="min-h-12 w-full rounded-r-xl bg-transparent px-3 outline-none" />
       </div>
-      <Button variant="outline" className="mt-3 min-h-11 w-full" onClick={() => toast(normalizePhone(phone) ? t("rider.signin.codeSent") : t("rider.signin.invalidPhone"))}>
+      <Button variant="outline" className="mt-3 min-h-11 w-full" onClick={() => void sendCode(phone, toast, t)}>
         {t("rider.signin.sendCode")}
       </Button>
       <label htmlFor="sms-code" className="mt-5 block text-sm font-medium">
@@ -72,7 +76,19 @@ export function SignInScreen({ busy, onSubmit, toast }: { busy: boolean; onSubmi
       <Button onClick={submit} disabled={busy} className="mt-5 min-h-14 w-full">
         {t("rider.signin.continue")}
       </Button>
-      <p className="mt-5 text-center text-xs text-muted-foreground">{t("rider.signin.demoNote")}</p>
+      {api.isDemoData && <p className="mt-5 text-center text-xs text-muted-foreground">{t("rider.signin.demoNote")}</p>}
+      <DevSignIn toast={toast} onSignedIn={() => onSubmit({ phone: "", code: "", name: "", consent: false })} />
     </div>
   )
+}
+
+/** Asks for an SMS code. With Supabase this sends it; the demo sends nothing and takes any 6 digits. */
+export async function sendCode(phone: string, toast: (message: string) => void, t: ReturnType<typeof useT>) {
+  if (!normalizePhone(phone)) return toast(t("rider.signin.invalidPhone"))
+  try {
+    const result = await api.requestSignInCode(phone)
+    toast(result.note ?? t(api.isDemoData ? "rider.signin.codeSent" : "signin.codeSentSms"))
+  } catch (error) {
+    toast(error instanceof Error ? error.message : t("rider.signin.failed"))
+  }
 }

@@ -3,7 +3,7 @@
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table"
 import { InvoiceStatusBadge } from "@/components/ops/invoices-screen"
 import { companyMonth } from "@/lib/company"
-import { formatMoney } from "@/lib/format"
+import { formatMoney, formatMoneyChange } from "@/lib/format"
 import { useT } from "@/lib/i18n"
 import { kigaliMonth } from "@/lib/time"
 import { useCompanyData } from "./company-data"
@@ -48,7 +48,10 @@ export function CompanyInvoices() {
                 {data.invoices.map((invoice) => (
                   <Tr key={invoice.id}>
                     <Td className="font-mono text-xs">{invoice.id}</Td>
-                    <Td>{invoice.period}</Td>
+                    <Td>
+                      {invoice.period}
+                      {invoice.adjustments.length > 0 && <span className="block text-xs text-muted-foreground">{t("ops.invoices.adjustmentsCompany", { count: invoice.adjustments.length, fare: formatMoneyChange(invoice.adjustments.reduce((sum, row) => sum + row.fare, 0)) })}</span>}
+                    </Td>
                     <Td className="text-right tabular-nums">{invoice.tripCount}</Td>
                     <Td className="text-right font-semibold tabular-nums">{formatMoney(invoice.total)}</Td>
                     <Td>

@@ -8,7 +8,8 @@ import { Field, Select, Textarea } from "@/components/ui/input"
 import * as api from "@/lib/api"
 import { formatDate } from "@/lib/format"
 import { useT, type TranslationKey } from "@/lib/i18n"
-import type { Incident, IncidentStatus } from "@/lib/types"
+import type { Incident, IncidentStatus, LostItem, LostItemStatus } from "@/lib/types"
+import { useLive } from "@/lib/use-live"
 import { errorText, useOps } from "./ops-context"
 import { useOpsData, type OpsData } from "./ops-data"
 import { Card, LoadError, Loading, PageHeader } from "./ops-ui"
@@ -25,6 +26,7 @@ export function IncidentsScreen() {
   const t = useT()
   const { data, error } = useOpsData()
   const [filter, setFilter] = useState<IncidentStatus | "">("")
+  const lost = useLive(() => api.getLostItems(), ["extras", "incidents"])
   if (error && !data) return <LoadError error={error} />
   if (!data) return <Loading />
   const rows = data.incidents.filter((incident) => !filter || incident.status === filter).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -44,13 +46,15 @@ export function IncidentsScreen() {
         </Field>
       </div>
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        {rows.length ? rows.map((incident) => <IncidentCard key={incident.id} incident={incident} data={data} />) : <p className="text-sm text-muted-foreground">{t("ops.incidents.none")}</p>}
+        {rows.length ? rows.map((incident) => <IncidentCard key={incident.id} incident={incident} data={data} lostItem={lost.data?.find((item) => item.incidentId === incident.id)} />) : <p className="text-sm text-muted-foreground">{t("ops.incidents.none")}</p>}
       </div>
     </>
   )
 }
 
-function IncidentCard({ incident, data }: { incident: Incident; data: OpsData }) {
+const lostStatuses: LostItemStatus[] = ["open", "found", "returned", "not_found"]
+
+function IncidentCard({ incident, data, lostItem }: { incident: Incident; data: OpsData; lostItem?: LostItem }) {
   const t = useT()
   const { isPlatform, toast } = useOps()
   const [note, setNote] = useState("")
@@ -87,6 +91,34 @@ function IncidentCard({ incident, data }: { incident: Incident; data: OpsData })
           </>
         )}
       </p>
+      {lostItem && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-secondary p-3 text-sm">
+          <label htmlFor={`lost-${lostItem.id}`} className="font-medium">
+            {t("ops.lost.status")}
+          </label>
+          <Select
+            id={`lost-${lostItem.id}`}
+            className="w-40"
+            disabled={busy}
+            value={lostItem.status}
+            onChange={(event) => {
+              setBusy(true)
+              api
+                .updateLostItem(lostItem.id, event.target.value as LostItemStatus)
+                .then(() => toast(t("ops.lost.saved")))
+                .catch((caught: unknown) => toast(errorText(caught, t("ops.actionFailed"))))
+                .finally(() => setBusy(false))
+            }}
+          >
+            {lostStatuses.map((status) => (
+              <option key={status} value={status}>
+                {t(`extras.lostStatus.${status}` as TranslationKey)}
+              </option>
+            ))}
+          </Select>
+          <span className="text-xs text-muted-foreground">{t("ops.lost.chatUntil", { time: formatDate(lostItem.chatOpenUntil) })}</span>
+        </div>
+      )}
       <h4 className="mt-4 text-sm font-semibold">{t("ops.incidents.notes", { count: incident.notes.length })}</h4>
       {incident.notes.length ? (
         <ol className="mt-1 list-decimal space-y-1 pl-5 text-sm">

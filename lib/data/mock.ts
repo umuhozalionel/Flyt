@@ -1,16 +1,20 @@
 import { offerSeconds } from "../config"
 import { documentBlocks } from "../documents"
 import { riderForDriver } from "../driver"
-import { pickupEtas } from "../eta"
+import { kmBetween, pickupEtas, pickupMinutes } from "../eta"
 import { makeJoinCode } from "../company"
 import { canInvoicePeriod, generateInvoices, nextInvoiceStatus } from "../invoices"
 import { kigaliDay } from "../time"
 import { buildDocuments, isWholeRwf, normalizePlate } from "../fleet"
 import { normalizePhone } from "../format"
+import { feePercentOf } from "../ops"
 import { buildSeed, SEED_VERSION, type MockDb } from "../mock-data"
 import { FareError, fareSplit, firmsOffering, quoteFare } from "../pricing"
 import { assertMove, reassignableStatuses } from "../trip-rules"
-import type { AdminUser, Car, Company, Driver, Firm, Rider, Trip, TripStatus } from "../types"
+import { bonusProgress, busyAreas, chatOpen, chatRole, checkTipAmount, defaultSettings, hasPhoneNumber, HEADING_HOME_MAX_HOURS, isVerifiedRider, LOST_ITEM_CHAT_HOURS, LOST_ITEM_DAYS, newPin, PIN_MAX_TRIES, rewardPoints, tipOpen } from "../additions"
+import { seedPin } from "../mock-data"
+import { hashOf } from "../map"
+import type { AdminUser, AppNotification, Car, Company, Driver, Firm, NotificationType, Rider, Trip, TripStatus, Viewer } from "../types"
 import type { DataSource, QuoteInput, RideQuote, Topic } from "./types"
 
 // Mock data source: a client-side store seeded from lib/mock-data.ts.
@@ -81,6 +85,91 @@ const clone = <T,>(value: T): T => structuredClone(value)
 const delay = (ms = 180) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 const nowIso = () => new Date().toISOString()
 
+// ── Notifications (Phase 6B). The same events and texts as the Postgres triggers. ─────────
+const viewerKey = (viewer: Viewer) => `${viewer.kind}:${viewer.id}`
+
+function notify(to: string | undefined, type: NotificationType, title: string, body: string, dedupe: string, tripId?: string) {
+  if (!to) return
+  const s = store()
+  if ((s.mutes[to] ?? []).includes(type)) return
+  if (s.notifications.some((item) => item.to === to && item.id === `${to}|${dedupe}`)) return
+  s.notifications.unshift({ id: `${to}|${dedupe}`, to, type, title, body, tripId, createdAt: nowIso() })
+  // Keep the demo store small.
+  if (s.notifications.length > 400) s.notifications.length = 400
+}
+
+const riderKey = (trip: Trip) => `rider:${trip.riderId}`
+const driverKey = (driverId?: string) => (driverId ? `driver:${driverId}` : undefined)
+const firstNameOf = (driverId?: string) => store().drivers.find((item) => item.id === driverId)?.name.split(/\s+/)[0] ?? "Your driver"
+
+/** Admins to tell about a trip: firm admins of its firm, and company admins of a company-billed trip (rule b). */
+function adminKeysFor(trip: Trip | undefined) {
+  if (!trip) return []
+  return store()
+    .admins.filter((admin) => (admin.role === "firm_admin" && admin.firmId === trip.firmId) || (admin.role === "company_admin" && !!trip.companyId && admin.companyId === trip.companyId))
+    .map((admin) => `admin:${admin.id}`)
+}
+
+const endedStatuses: TripStatus[] = ["completed", "cancelled_by_rider", "cancelled_by_driver", "no_driver_found"]
+
+function tripEvent(trip: Trip, to: TripStatus) {
+  const name = firstNameOf(trip.driverId)
+  if (to === "driver_arriving") notify(riderKey(trip), "driver_assigned", "Driver on the way", `${name} accepted your ride.`, `trip:${trip.id}:assigned`, trip.id)
+  if (to === "driver_arrived") notify(riderKey(trip), "driver_arrived", "Your driver is here", `${name} has arrived at the pickup.`, `trip:${trip.id}:arrived`, trip.id)
+  if (to === "in_progress") notify(riderKey(trip), "trip_started", "Trip started", "Have a good ride.", `trip:${trip.id}:started`, trip.id)
+  if (to === "completed") notify(riderKey(trip), "receipt_ready", "Receipt ready", `Your receipt for trip ${trip.id} is ready.`, `trip:${trip.id}:receipt`, trip.id)
+  if (to === "cancelled_by_rider") notify(driverKey(trip.driverId), "trip_cancelled_by_rider", "Trip cancelled", `The rider cancelled trip ${trip.id}.`, `trip:${trip.id}:cancelled`, trip.id)
+  // Trip ended: sharing links stop working.
+  if (endedStatuses.includes(to)) for (const share of store().shares) if (share.tripId === trip.id && !share.revokedAt) share.revokedAt = nowIso()
+}
+
+/** Time-based notices, like app.run_reminders in Postgres. Each is sent once. */
+function runReminders(now = Date.now()) {
+  const s = store()
+  const remind = s.settings.scheduledReminderMinutes * 60_000
+  const today = kigaliDay(new Date(now))
+  for (const trip of s.trips) {
+    if (trip.scheduledFor && ["scheduled", "assigned", "driver_arriving"].includes(trip.status)) {
+      const at = Date.parse(trip.scheduledFor)
+      if (at >= now && at <= now + remind) {
+        const time = new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Kigali", hour: "2-digit", minute: "2-digit" }).format(new Date(at))
+        notify(riderKey(trip), "scheduled_reminder", "Ride soon", `Your scheduled ride is at ${time}.`, `trip:${trip.id}:reminder`, trip.id)
+        notify(driverKey(trip.driverId), "scheduled_reminder", "Scheduled ride soon", `Pickup at ${time}.`, `trip:${trip.id}:reminder`, trip.id)
+      }
+    }
+    if (trip.status === "driver_arriving" && trip.acceptedAt) {
+      const driver = s.drivers.find((item) => item.id === trip.driverId)
+      const eta = driver ? pickupMinutes(kmBetween(driver.zone, trip.pickup)) : undefined
+      if (eta != null && Date.parse(trip.acceptedAt) + Math.max(eta - 2, 0) * 60_000 <= now) notify(riderKey(trip), "driver_arriving", "Driver almost there", "About 2 minutes away.", `trip:${trip.id}:arriving`, trip.id)
+    }
+    if (trip.status === "requested" && Date.parse(trip.createdAt) < now - s.settings.requestWaitingMinutes * 60_000) {
+      for (const key of adminKeysFor(trip)) notify(key, "request_waiting", "Request waiting", `Trip ${trip.id} has waited over ${s.settings.requestWaitingMinutes} minutes for a driver.`, `trip:${trip.id}:waiting`, trip.id)
+    }
+  }
+  const in30 = kigaliDay(new Date(Date.parse(`${today}T12:00:00Z`) + 30 * 86_400_000))
+  const in7 = kigaliDay(new Date(Date.parse(`${today}T12:00:00Z`) + 7 * 86_400_000))
+  for (const driver of s.drivers) {
+    const car = s.cars.find((item) => item.id === driver.carId)
+    for (const doc of [...driver.documents, ...(car?.documents ?? [])]) {
+      if (doc.review !== "on_file" || !doc.expiryDate) continue
+      if (doc.expiryDate === in30 || doc.expiryDate === in7) {
+        const days = doc.expiryDate === in30 ? 30 : 7
+        notify(`driver:${driver.id}`, days === 30 ? "document_expiring_30" : "document_expiring_7", "Document expiring", `${doc.type.replace(/_/g, " ")} expires on ${doc.expiryDate}.`, `doc:${doc.id}:expiry:${doc.expiryDate}:${days}`)
+      }
+    }
+  }
+}
+
+/** Mock rule for dispatch: the open queue is for platform admins; a firm admin reassigns trips already given to their firm. */
+function checkDispatch(trip: Trip, driver: Driver, byAdminId?: string) {
+  if (!byAdminId) return
+  const admin = store().admins.find((item) => item.id === byAdminId)
+  if (!admin || admin.role === "platform_admin") return
+  const current = store().drivers.find((item) => item.id === trip.driverId)
+  if (admin.role === "firm_admin" && current?.firmId === admin.firmId && driver.firmId === admin.firmId) return
+  throw new Error("The open queue is for Flyt Operations. You can reassign trips already given to your firm, to your own drivers")
+}
+
 function findTrip(id: string) {
   const trip = store().trips.find((item) => item.id === id)
   if (!trip) throw new Error("Trip not found")
@@ -104,6 +193,7 @@ function move(trip: Trip, to: TripStatus) {
   assertMove(trip.status, to)
   trip.status = to
   trip.updatedAt = nowIso()
+  tripEvent(trip, to)
 }
 
 /** Free the driver and car attached to a trip. */
@@ -115,6 +205,7 @@ function release(trip: Trip) {
     driver.approval = "suspended"
     driver.status = "offline"
     driver.suspendAfterTrip = undefined
+    notify(`driver:${driver.id}`, "account_suspended", "Account suspended", "Contact your firm or Flyt Operations.", `approval:${driver.id}:${nowIso()}`)
   }
   const car = store().cars.find((item) => item.id === trip.carId)
   if (car && car.availability === "in_use") car.availability = "available"
@@ -132,7 +223,7 @@ function expireOffers() {
       changed = true
     }
   }
-  if (changed) commit(["offers", "trips", "drivers", "cars"])
+  if (changed) commit(["notifications", "offers", "trips", "drivers", "cars"])
 }
 
 function backToQueue(trip: Trip) {
@@ -169,7 +260,9 @@ function attach(trip: Trip, driver: Driver) {
   driver.status = "on_trip"
   car.availability = "in_use"
   const now = Date.now()
-  store().offers.push({ id: `offer-${now}-${driver.id}`, tripId: trip.id, driverId: driver.id, status: "pending", createdAt: new Date(now).toISOString(), expiresAt: new Date(now + offerSeconds * 1000).toISOString() })
+  const offerId = `offer-${now}-${driver.id}`
+  store().offers.push({ id: offerId, tripId: trip.id, driverId: driver.id, status: "pending", createdAt: new Date(now).toISOString(), expiresAt: new Date(now + offerSeconds * 1000).toISOString() })
+  notify(`driver:${driver.id}`, "offer_new", "New trip offer", `You have ${offerSeconds} seconds to accept.`, `offer:${offerId}`, trip.id)
 }
 
 /** Pick the firm for a new booking: an active firm that offers the ride type, preferring one with a free driver. */
@@ -233,6 +326,34 @@ export const mockSource: DataSource = {
   async getIncidents() { await delay(); return clone(store().incidents) },
   async getPricing() { await delay(); return clone(store().pricing) },
   async getAdmins() { await delay(); return clone(store().admins) },
+
+  async requestSignInCode(phone) {
+    await delay(200)
+    if (!normalizePhone(phone)) throw new Error("Enter a valid Rwandan mobile number")
+    // Demo data: no SMS is sent and any 6-digit code works.
+    return { sent: true }
+  },
+
+  async signInAdmin({ phone, portal }) {
+    await delay(300)
+    const normalized = normalizePhone(phone)
+    if (!normalized) throw new Error("Enter a valid Rwandan mobile number")
+    const roles = portal === "ops" ? ["platform_admin", "firm_admin"] : ["company_admin"]
+    const found = store().admins.filter((admin) => normalizePhone(admin.phone) === normalized && roles.includes(admin.role))
+    if (!found.length) throw new Error("This number has no access here")
+    return clone(found)
+  },
+
+  async getSignedInAdmins() {
+    return []
+  },
+
+  async signOut() {},
+
+  async getDocumentFileUrl() {
+    // The demo keeps no files; they are stored only with Supabase.
+    return undefined
+  },
 
   async signInRider({ phone, name, consent, joinCode }) {
     await delay(300)
@@ -320,27 +441,31 @@ export const mockSource: DataSource = {
       updatedAt: now,
     }
     s.trips.unshift(trip)
-    commit(["trips"])
+    s.pins[trip.id] = { pin: newPin(), wrongTries: 0 }
+    commit(["notifications", "trips"])
     return clone(trip)
   },
 
-  async assignDriver(tripId, driverId) {
+  async assignDriver(tripId, driverId, byAdminId) {
     await delay()
     expireOffers()
     const trip = findTrip(tripId)
+    const driver = findDriver(driverId)
+    checkDispatch(trip, driver, byAdminId)
     assertMove(trip.status, "assigned")
-    attach(trip, findDriver(driverId))
+    attach(trip, driver)
     move(trip, "assigned")
-    commit(["trips", "drivers", "cars", "offers"])
+    commit(["notifications", "trips", "drivers", "cars", "offers"])
     return clone(trip)
   },
 
-  async reassignDriver(tripId, driverId) {
+  async reassignDriver(tripId, driverId, byAdminId) {
     await delay()
     const trip = findTrip(tripId)
     if (!reassignableStatuses.includes(trip.status)) throw new Error("This trip can no longer be reassigned")
     if (trip.driverId === driverId) throw new Error("This driver already has the trip")
     const next = findDriver(driverId)
+    checkDispatch(trip, next, byAdminId)
     checkDriverCanTake(trip, next)
     for (const offer of store().offers) if (offer.tripId === trip.id && offer.status === "pending") offer.status = "expired"
     release(trip)
@@ -349,7 +474,7 @@ export const mockSource: DataSource = {
     trip.acceptedAt = undefined
     attach(trip, next)
     trip.updatedAt = nowIso()
-    commit(["trips", "drivers", "cars", "offers"])
+    commit(["notifications", "trips", "drivers", "cars", "offers"])
     return clone(trip)
   },
 
@@ -370,7 +495,7 @@ export const mockSource: DataSource = {
       offer.status = "declined"
       backToQueue(trip)
     }
-    commit(["trips", "offers", "drivers", "cars"])
+    commit(["notifications", "trips", "offers", "drivers", "cars"])
     return clone(trip)
   },
 
@@ -379,16 +504,25 @@ export const mockSource: DataSource = {
     const trip = findTrip(tripId)
     move(trip, "driver_arrived")
     trip.arrivedAt = nowIso()
-    commit(["trips"])
+    commit(["notifications", "trips"])
     return clone(trip)
   },
 
-  async startTrip(tripId) {
+  async startTrip(tripId, pin) {
     await delay()
     const trip = findTrip(tripId)
+    if (!pin || !/^\d{4}$/.test(pin)) throw new Error("Enter the rider's 4-digit trip PIN")
+    const s = store()
+    const entry = (s.pins[trip.id] ??= { pin: seedPin(trip.id), wrongTries: 0 })
+    if (entry.wrongTries >= PIN_MAX_TRIES) throw new Error("Too many wrong PINs. Call Flyt Operations to start this trip")
+    if (entry.pin !== pin) {
+      entry.wrongTries += 1
+      commit(["notifications", "trips"])
+      throw new Error("That PIN is not right. Ask the rider for the PIN in their app")
+    }
     move(trip, "in_progress")
     trip.startedAt = nowIso()
-    commit(["trips"])
+    commit(["notifications", "trips"])
     return clone(trip)
   },
 
@@ -400,7 +534,7 @@ export const mockSource: DataSource = {
     // Demo EBM receipt number. In production the firm's EBM system issues it.
     trip.receiptNo = `EBM-${trip.completedAt.slice(0, 4)}-${String(Math.floor(10000 + Math.random() * 89999))}`
     release(trip)
-    commit(["trips", "drivers", "cars"])
+    commit(["notifications", "trips", "drivers", "cars"])
     return clone(trip)
   },
 
@@ -416,7 +550,7 @@ export const mockSource: DataSource = {
     trip.cancelledAt = nowIso()
     trip.cancelledBy = by
     trip.cancelReason = reason.trim()
-    commit(["trips", "drivers", "cars", "offers"])
+    commit(["notifications", "trips", "drivers", "cars", "offers"])
     return clone(trip)
   },
 
@@ -427,7 +561,7 @@ export const mockSource: DataSource = {
     trip.cancelledAt = nowIso()
     trip.cancelledBy = "system"
     trip.cancelReason = "No driver accepted"
-    commit(["trips"])
+    commit(["notifications", "trips"])
     return clone(trip)
   },
 
@@ -440,7 +574,7 @@ export const mockSource: DataSource = {
     trip.riderPaidAt = nowIso()
     trip.paymentStatus = "pending"
     trip.updatedAt = nowIso()
-    commit(["trips"])
+    commit(["notifications", "trips"])
     return clone(trip)
   },
 
@@ -450,8 +584,9 @@ export const mockSource: DataSource = {
     if (trip.status !== "completed" || trip.paymentMethod === "company_account") throw new Error("Nothing to confirm for this trip")
     trip.paymentStatus = received ? "paid" : "failed"
     trip.paidAt = received ? nowIso() : undefined
+    if (received) notify(driverKey(trip.driverId), "payment_confirmed", "Payment confirmed", `Payment for trip ${trip.id} is confirmed.`, `trip:${trip.id}:paid`, trip.id)
     trip.updatedAt = nowIso()
-    commit(["trips"])
+    commit(["notifications", "trips"])
     return clone(trip)
   },
 
@@ -463,7 +598,7 @@ export const mockSource: DataSource = {
     trip.riderRating = rating
     trip.ratingTags = tags?.length ? tags : undefined
     trip.ratingComment = comment?.trim() || undefined
-    commit(["trips"])
+    commit(["notifications", "trips"])
     return clone(trip)
   },
 
@@ -473,7 +608,7 @@ export const mockSource: DataSource = {
     const trip = findTrip(tripId)
     if (trip.status !== "completed") throw new Error("Rate after the trip ends")
     trip.driverRating = rating
-    commit(["trips"])
+    commit(["notifications", "trips"])
     return clone(trip)
   },
 
@@ -546,8 +681,12 @@ export const mockSource: DataSource = {
     }
     if (approval === "suspended") driver.status = "offline"
     if (approval === "approved" && driver.documents.some((doc) => documentBlocks(doc))) throw new Error("Expired, missing or rejected documents must be fixed before approval")
+    if (driver.approval !== approval) {
+      if (approval === "approved") notify(`driver:${driver.id}`, "account_approved", "Account approved", "You can go online now.", `approval:${driver.id}:${nowIso()}`)
+      else notify(`driver:${driver.id}`, "account_suspended", "Account suspended", "Contact your firm or Flyt Operations.", `approval:${driver.id}:${nowIso()}`)
+    }
     driver.approval = approval
-    commit(["drivers"])
+    commit(["drivers", "notifications"])
     return clone(driver)
   },
 
@@ -570,6 +709,10 @@ export const mockSource: DataSource = {
       doc.review = "on_file"
       doc.rejectReason = undefined
     }
+    const who = owner === "driver" ? ownerId : s.drivers.find((item) => item.carId === ownerId)?.id
+    const label = type.replace(/_/g, " ")
+    if (decision === "reject") notify(driverKey(who), "document_rejected", "Document rejected", doc.rejectReason ?? "Send a new one.", `doc:${doc.id}:${nowIso()}`)
+    else notify(driverKey(who), "document_approved", "Document approved", `${label} was approved.`, `doc:${doc.id}:${nowIso()}`)
     // A driver who was online with a document that is now rejected goes offline.
     if (owner === "driver" && decision === "reject") {
       const driver = holder as Driver
@@ -650,9 +793,33 @@ export const mockSource: DataSource = {
     const invoice = kind === "fee" ? s.feeInvoices.find((item) => item.id === invoiceId) : s.companyInvoices.find((item) => item.id === invoiceId)
     if (!invoice) throw new Error("Invoice not found")
     if (nextInvoiceStatus[invoice.status] !== status) throw new Error("Invoices move from draft to sent to paid")
+    if (status === "sent") {
+      const owners = s.admins.filter((admin) => ("firmId" in invoice ? admin.firmId === invoice.firmId : admin.companyId === invoice.companyId))
+      for (const admin of owners) notify(`admin:${admin.id}`, "invoice_sent", "Invoice sent", `Invoice ${invoice.id} for ${invoice.period} is ready.`, `invoice:${invoice.id}`)
+    }
     invoice.status = status
-    commit(["invoices"])
+    commit(["invoices", "notifications"])
     return clone(invoice)
+  },
+
+  async correctTripFare({ adminId, tripId, fare, reason }) {
+    await delay()
+    const s = store()
+    const admin = s.admins.find((item) => item.id === adminId)
+    if (admin?.role !== "platform_admin") throw new Error("Only platform admins can correct a fare")
+    const trip = findTrip(tripId)
+    if (trip.status !== "completed") throw new Error("Only a completed trip's fare can be corrected")
+    if (!Number.isInteger(fare) || fare < 0) throw new Error("The fare must be a whole Rwf amount (0 voids the trip)")
+    if (fare === trip.fare) throw new Error("The fare is already this amount")
+    if (!reason.trim()) throw new Error("Give a reason for the correction")
+    // The fee rate stays the one the trip was booked at.
+    const percent = trip.corrections?.[0]?.feePercent ?? feePercentOf(trip)
+    trip.corrections = [...(trip.corrections ?? []), { at: nowIso(), byAdminId: adminId, fromFare: trip.fare, toFare: fare, reason: reason.trim().slice(0, 200), feePercent: percent }]
+    trip.fare = fare
+    trip.platformFee = fareSplit(fare, percent).platformFee
+    trip.updatedAt = nowIso()
+    commit(["notifications", "trips"])
+    return clone(trip)
   },
 
   async addAdmin(input) {
@@ -707,7 +874,8 @@ export const mockSource: DataSource = {
     // A driver sees a trip only while it is theirs, or once they drove it.
     if (!trip || trip.driverId !== driverId) return undefined
     const rider = s.riders.find((item) => item.id === trip.riderId)
-    return clone({ trip, rider: riderForDriver(trip, rider, s.trips.filter((item) => item.riderId === trip.riderId)), car: s.cars.find((item) => item.id === trip.carId), firm: s.firms.find((item) => item.id === trip.firmId) })
+    const forDriver = { ...riderForDriver(trip, rider, s.trips.filter((item) => item.riderId === trip.riderId)), verified: isVerifiedRider(rider, s.companies) }
+    return clone({ trip, rider: forDriver, car: s.cars.find((item) => item.id === trip.carId), firm: s.firms.find((item) => item.id === trip.firmId) })
   },
 
   async submitDocument(driverId, type, expiryDate) {
@@ -771,11 +939,24 @@ export const mockSource: DataSource = {
     return clone(firm)
   },
 
+  async setFirmRates(firmId, rates) {
+    await delay()
+    for (const rate of [rates.hourlyRate, rates.dailyRate]) if (rate != null && !isWholeRwf(rate)) throw new Error("Rates must be whole Rwf amounts")
+    const firm = findFirm(firmId)
+    // Fares already booked stay fixed; new hire bookings use the new rates.
+    firm.hourlyRate = rates.hourlyRate ?? undefined
+    firm.dailyRate = rates.dailyRate ?? undefined
+    commit(["firms"])
+    return clone(firm)
+  },
+
   async reportIncident(input) {
     await delay()
     const incident = { id: `INC-${Date.now().toString().slice(-5)}`, status: "open" as const, notes: [], createdAt: nowIso(), ...input }
     store().incidents.unshift(incident)
-    commit(["incidents"])
+    const trip = store().trips.find((item) => item.id === incident.tripId)
+    for (const key of adminKeysFor(trip)) notify(key, "incident_opened", "Incident opened", incident.description.slice(0, 120), `incident:${incident.id}`, incident.tripId)
+    commit(["incidents", "notifications"])
     return clone(incident)
   },
 
@@ -791,10 +972,275 @@ export const mockSource: DataSource = {
     return clone(incident)
   },
 
+
+  // ── Phase 6B additions ─────────────────────────────────────────────────────────────────
+
+  async getNotifications(viewer) {
+    await delay(60)
+    runReminders()
+    const key = viewerKey(viewer)
+    return clone(store().notifications.filter((item) => item.to === key).map((item): AppNotification => ({ id: item.id, type: item.type, title: item.title, body: item.body, link: item.link, tripId: item.tripId, createdAt: item.createdAt, readAt: item.readAt })))
+  },
+  async markNotificationsRead(viewer, ids) {
+    const key = viewerKey(viewer)
+    const at = nowIso()
+    for (const item of store().notifications) if (item.to === key && !item.readAt && (!ids || ids.includes(item.id))) item.readAt = at
+    commit(["notifications"])
+  },
+  async getNotificationMutes(viewer) {
+    return clone(store().mutes[viewerKey(viewer)] ?? [])
+  },
+  async setNotificationMute(viewer, type, muted) {
+    const s = store()
+    const key = viewerKey(viewer)
+    const current = new Set(s.mutes[key] ?? [])
+    if (muted) current.add(type)
+    else current.delete(type)
+    s.mutes[key] = [...current]
+    commit(["notifications"])
+  },
+  async savePushSubscription(viewer, subscription) {
+    const s = store()
+    s.pushSubscriptions = s.pushSubscriptions.filter((item) => item.endpoint !== subscription.endpoint)
+    s.pushSubscriptions.push({ ...subscription, to: viewerKey(viewer) })
+    commit(["notifications"])
+  },
+  async deletePushSubscription(endpoint) {
+    const s = store()
+    s.pushSubscriptions = s.pushSubscriptions.filter((item) => item.endpoint !== endpoint)
+    commit(["notifications"])
+  },
+
+  async getTripPin(tripId) {
+    const s = store()
+    const trip = s.trips.find((item) => item.id === tripId)
+    if (!trip) return undefined
+    return (s.pins[trip.id] ??= { pin: seedPin(trip.id), wrongTries: 0 }).pin
+  },
+
+  async getChat(tripId, channel) {
+    await delay(60)
+    return clone(store().chat.filter((item) => item.tripId === tripId && item.channel === channel).sort((a, b) => a.createdAt.localeCompare(b.createdAt)))
+  },
+  async sendChat({ tripId, channel, body, quickReply, from }) {
+    await delay(80)
+    const s = store()
+    const trip = findTrip(tripId)
+    const text = body.trim()
+    const admin = from.sender === "company" ? s.admins.find((item) => item.id === from.senderId) : undefined
+    const role = chatRole(trip, channel, from.sender === "rider" ? { riderId: from.senderId } : from.sender === "driver" ? { driverId: from.senderId } : { companyId: admin?.companyId })
+    if (!role) throw new Error("This is not your trip")
+    if (!chatOpen(trip, s.lostItems)) throw new Error("Chat is closed for this trip")
+    if (!text) throw new Error("Write a message")
+    if (hasPhoneNumber(text)) throw new Error("Phone numbers cannot be sent in chat")
+    const message = { id: `msg-${Date.now()}-${Math.floor(Math.random() * 1000)}`, tripId, channel, sender: role, senderId: from.senderId, body: text.slice(0, 500), quickReply: !!quickReply, createdAt: nowIso() }
+    s.chat.push(message)
+    if (role !== "driver") notify(driverKey(trip.driverId), "chat_message", "New message", text.slice(0, 120), `chat:${message.id}`, trip.id)
+    else if (channel === "rider_driver") notify(riderKey(trip), "chat_message", "New message from your driver", text.slice(0, 120), `chat:${message.id}`, trip.id)
+    else for (const item of s.admins.filter((a) => a.role === "company_admin" && a.companyId === trip.companyId)) notify(`admin:${item.id}`, "chat_message", "New message from the driver", text.slice(0, 120), `chat:${message.id}`, trip.id)
+    commit(["chat", "notifications"])
+    return clone(message)
+  },
+
+  async getFavouriteDrivers(riderId) {
+    return clone(store().favourites.filter((item) => !riderId || item.riderId === riderId))
+  },
+  async setFavouriteDriver(riderId, driverId, favourite) {
+    await delay()
+    const s = store()
+    if (favourite) {
+      if (!s.trips.some((trip) => trip.riderId === riderId && trip.driverId === driverId && trip.status === "completed")) throw new Error("You can favourite a driver after a trip with them")
+      if (!s.favourites.some((item) => item.riderId === riderId && item.driverId === driverId)) s.favourites.push({ riderId, driverId, createdAt: nowIso() })
+    } else {
+      s.favourites = s.favourites.filter((item) => !(item.riderId === riderId && item.driverId === driverId))
+    }
+    commit(["extras"])
+  },
+
+  async getDriverPreferences() {
+    return clone(store().preferences)
+  },
+  async setDriverPreferences(driverId, preferences) {
+    await delay()
+    const s = store()
+    findDriver(driverId)
+    if (!preferences.rideTypes.length) throw new Error("Pick at least one ride type")
+    if (preferences.headingHomeZone) {
+      const until = preferences.headingHomeUntil ? Date.parse(preferences.headingHomeUntil) : NaN
+      if (!(until > Date.now()) || until > Date.now() + HEADING_HOME_MAX_HOURS * 3_600_000) throw new Error("Heading home lasts up to 12 hours")
+    }
+    const row = { driverId, rideTypes: [...preferences.rideTypes], headingHomeZone: preferences.headingHomeZone || undefined, headingHomeUntil: preferences.headingHomeZone ? preferences.headingHomeUntil : undefined }
+    s.preferences = [...s.preferences.filter((item) => item.driverId !== driverId), row]
+    commit(["extras", "drivers"])
+    return clone(row)
+  },
+
+  async getBusyAreas() {
+    await delay(60)
+    return busyAreas(store().trips)
+  },
+
+  async getFreeCars() {
+    await delay(60)
+    const s = store()
+    const activeFirms = new Set(s.firms.filter((firm) => firm.status === "active").map((firm) => firm.id))
+    return s.drivers
+      .filter((driver) => driver.approval === "approved" && driver.status === "online" && activeFirms.has(driver.firmId) && s.cars.some((car) => car.id === driver.carId && car.availability === "available"))
+      .map((driver) => ({ key: `car-${hashOf(driver.id).toString(36)}`, zone: driver.zone }))
+  },
+
+  async createTripShare(tripId) {
+    await delay()
+    const trip = findTrip(tripId)
+    if (endedStatuses.includes(trip.status)) throw new Error("This trip has ended")
+    const bytes = new Uint8Array(24)
+    crypto.getRandomValues(bytes)
+    const token = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("")
+    store().shares.push({ token, tripId })
+    commit(["extras"])
+    return token
+  },
+  async revokeTripShares(tripId) {
+    for (const share of store().shares) if (share.tripId === tripId && !share.revokedAt) share.revokedAt = nowIso()
+    commit(["extras"])
+  },
+  async getSharedTrip(token) {
+    await delay(60)
+    const s = store()
+    const share = s.shares.find((item) => item.token === token && !item.revokedAt)
+    const trip = share && s.trips.find((item) => item.id === share.tripId)
+    if (!trip || endedStatuses.includes(trip.status)) return undefined
+    const driver = s.drivers.find((item) => item.id === trip.driverId)
+    const car = s.cars.find((item) => item.id === trip.carId)
+    const eta = driver && trip.status === "driver_arriving" ? pickupMinutes(kmBetween(driver.zone, trip.pickup)) : undefined
+    return clone({
+      status: trip.status,
+      type: trip.type,
+      pickup: trip.pickup,
+      dropoff: trip.dropoff,
+      acceptedAt: trip.acceptedAt,
+      arrivedAt: trip.arrivedAt,
+      startedAt: trip.startedAt,
+      pickupEtaMinutes: eta,
+      driverFirstName: driver?.name.split(/\s+/)[0],
+      car: car ? { plate: car.plate, make: car.make, model: car.model, colour: car.colour } : undefined,
+    })
+  },
+
+  async getLostItems() {
+    await delay(60)
+    return clone(store().lostItems)
+  },
+  async reportLostItem(tripId, description) {
+    await delay()
+    const s = store()
+    const trip = findTrip(tripId)
+    if (trip.status !== "completed" || !trip.driverId) throw new Error("Report a lost item after a completed trip")
+    if (trip.completedAt && Date.parse(trip.completedAt) < Date.now() - LOST_ITEM_DAYS * 86_400_000) throw new Error("Lost items can be reported up to 30 days after the trip")
+    const text = description.trim()
+    if (!text) throw new Error("Describe the item")
+    const incident = { id: `INC-${Date.now().toString().slice(-5)}`, tripId, type: "lost_item" as const, description: `Lost item: ${text.slice(0, 480)}`, status: "open" as const, notes: [], reportedBy: "rider", createdAt: nowIso() }
+    s.incidents.unshift(incident)
+    for (const key of adminKeysFor(trip)) notify(key, "incident_opened", "Incident opened", incident.description.slice(0, 120), `incident:${incident.id}`, tripId)
+    const item = { id: `LOST-${Date.now().toString(36).slice(-6)}`, tripId, riderId: trip.riderId, incidentId: incident.id, description: text.slice(0, 500), status: "open" as const, chatOpenUntil: new Date(Date.now() + LOST_ITEM_CHAT_HOURS * 3_600_000).toISOString(), createdAt: nowIso() }
+    s.lostItems.unshift(item)
+    commit(["extras", "incidents", "chat", "notifications"])
+    return clone(item)
+  },
+  async updateLostItem(itemId, status) {
+    await delay()
+    const item = store().lostItems.find((row) => row.id === itemId)
+    if (!item) throw new Error("Not found")
+    item.status = status
+    commit(["extras"])
+    return clone(item)
+  },
+
+  async getSettings() {
+    return clone({ ...defaultSettings, ...store().settings })
+  },
+  async setSetting(key, value) {
+    await delay()
+    const s = store()
+    s.settings = { ...defaultSettings, ...s.settings, [key]: value }
+    commit(["extras"])
+    return clone(s.settings)
+  },
+  async getBonusTargets() {
+    return clone(store().bonusTargets)
+  },
+  async saveBonusTarget(input) {
+    await delay()
+    const s = store()
+    const name = input.name.trim()
+    if (!name) throw new Error("Give the target a name")
+    if (!Number.isInteger(input.target) || input.target < 1) throw new Error("The target is a whole number of trips, 1 or more")
+    const existing = input.id ? s.bonusTargets.find((item) => item.id === input.id) : undefined
+    const row = { id: existing?.id ?? `bonus-${Date.now().toString(36)}`, name, metric: "completed_trips" as const, period: input.period, target: input.target, firmId: input.firmId || undefined, active: input.active, createdAt: existing?.createdAt ?? nowIso() }
+    s.bonusTargets = existing ? s.bonusTargets.map((item) => (item.id === row.id ? row : item)) : [...s.bonusTargets, row]
+    commit(["extras"])
+    return clone(row)
+  },
+  async getBonusProgress(driverId) {
+    const s = store()
+    const driver = findDriver(driverId)
+    return bonusProgress(driver, s.bonusTargets, s.trips, { ...defaultSettings, ...s.settings })
+  },
+
+  async getRewardPoints(riderId) {
+    const s = store()
+    return rewardPoints(riderId, s.trips, { ...defaultSettings, ...s.settings })
+  },
+
+  async getTipDetails(tripId) {
+    await delay(60)
+    const s = store()
+    const trip = s.trips.find((item) => item.id === tripId)
+    if (!trip) return undefined
+    const driver = s.drivers.find((item) => item.id === trip.driverId)
+    const firm = s.firms.find((item) => item.id === driver?.firmId)
+    if (!tipOpen(trip, driver, firm)) return undefined
+    return { driverFirstName: driver!.name.split(/\s+/)[0], momoNumber: driver!.tipMomoNumber!, until: new Date(Date.parse(trip.completedAt!) + 24 * 3_600_000).toISOString(), alreadyTipped: s.tips.some((tip) => tip.tripId === trip.id) }
+  },
+  async recordTip(tripId, amount) {
+    await delay()
+    const s = store()
+    if (!(await this.getTipDetails(tripId))) throw new Error("Tips are not available for this trip")
+    checkTipAmount(amount)
+    if (s.tips.some((tip) => tip.tripId === tripId)) throw new Error("You already tipped on this trip")
+    const trip = findTrip(tripId)
+    // The rider says they sent it by MoMo; Flyt does not see or move the money.
+    const tip = { id: `tip-${Date.now()}`, tripId, riderId: trip.riderId, driverId: trip.driverId!, amount, riderSentAt: nowIso() }
+    s.tips.push(tip)
+    commit(["extras"])
+    return clone(tip)
+  },
+  async getTips() {
+    return clone(store().tips)
+  },
+  async setFirmTips(firmId, enabled) {
+    await delay()
+    const firm = findFirm(firmId)
+    firm.tipsEnabled = enabled
+    commit(["firms"])
+    return clone(firm)
+  },
+  async setTipSettings(driverId, { optIn, momoNumber }) {
+    await delay()
+    const driver = findDriver(driverId)
+    const phone = momoNumber?.trim() ? normalizePhone(momoNumber) : undefined
+    if (momoNumber?.trim() && !phone) throw new Error("Enter a valid Rwandan mobile number")
+    if (optIn && !(phone ?? driver.tipMomoNumber)) throw new Error("Add the MoMo number tips should go to")
+    driver.tipsOptIn = optIn
+    if (phone) driver.tipMomoNumber = phone
+    commit(["drivers"])
+    return clone(driver)
+  },
+
   async resetDemo() {
     await delay()
     db = buildSeed()
-    commit(["firms", "companies", "riders", "drivers", "cars", "trips", "offers", "routes", "invoices", "incidents", "pricing", "admins"])
+    commit(["firms", "companies", "riders", "drivers", "cars", "trips", "offers", "routes", "invoices", "incidents", "pricing", "admins", "notifications", "chat", "extras"])
   },
 }
 

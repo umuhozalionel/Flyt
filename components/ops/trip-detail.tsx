@@ -2,19 +2,26 @@
 
 import { ArrowLeft, Star } from "lucide-react"
 import Link from "next/link"
+import { useState } from "react"
 import { MapView } from "@/components/shared/map-view"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Dialog } from "@/components/ui/dialog"
+import { Field, Input } from "@/components/ui/input"
+import * as api from "@/lib/api"
 import { formatDate, formatMoney, formatPhone } from "@/lib/format"
 import { useT, type TranslationKey } from "@/lib/i18n"
 import { feePercentOf, tripTimeline } from "@/lib/ops"
 import { placeName } from "@/lib/places"
+import type { Trip } from "@/lib/types"
+import { errorText, useOps } from "./ops-context"
 import type { OpsData } from "./ops-data"
 import { Card, Facts, PageHeader } from "./ops-ui"
 
 export function TripDetail({ tripId, data, onBack }: { tripId: string; data: OpsData; onBack: () => void }) {
   const t = useT()
+  const { isPlatform } = useOps()
   const trip = data.trips.find((item) => item.id === tripId)
   const back = (
     <Button variant="outline" className="min-h-10" onClick={onBack}>
@@ -82,6 +89,7 @@ export function TripDetail({ tripId, data, onBack }: { tripId: string; data: Ops
             </dl>
             <p className="mt-2 text-xs text-muted-foreground">{t("common.taxNote")}</p>
           </Card>
+          {(trip.corrections?.length || (isPlatform && trip.status === "completed")) && <FareCorrections trip={trip} canCorrect={isPlatform && trip.status === "completed"} />}
           <Card title={t("ops.trips.payment")}>
             <Facts
               rows={[
@@ -135,5 +143,81 @@ export function TripDetail({ tripId, data, onBack }: { tripId: string; data: Ops
         </div>
       </div>
     </>
+  )
+}
+
+/** Fare corrections on a completed trip. Platform admins can correct the fare (0 voids the trip) with a reason. */
+function FareCorrections({ trip, canCorrect }: { trip: Trip; canCorrect: boolean }) {
+  const t = useT()
+  const { admin, toast } = useOps()
+  const [open, setOpen] = useState(false)
+  const [fare, setFare] = useState(String(trip.fare))
+  const [reason, setReason] = useState("")
+  const [busy, setBusy] = useState(false)
+  const corrections = trip.corrections ?? []
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault()
+    setBusy(true)
+    try {
+      await api.correctTripFare({ adminId: admin?.id ?? "", tripId: trip.id, fare: Number(fare), reason })
+      toast(t("ops.trips.corrected", { id: trip.id }))
+      setOpen(false)
+      setReason("")
+    } catch (caught) {
+      toast(errorText(caught, t("ops.actionFailed")))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card
+      title={t("ops.trips.corrections")}
+      action={
+        canCorrect && (
+          <Button size="sm" variant="outline" className="min-h-9" onClick={() => { setFare(String(trip.fare)); setOpen(true) }}>
+            {t("ops.trips.correct")}
+          </Button>
+        )
+      }
+    >
+      {corrections.length ? (
+        <ol className="flex flex-col gap-2 text-sm">
+          {corrections.map((item) => (
+            <li key={item.at}>
+              <span className="font-medium tabular-nums">
+                {formatMoney(item.fromFare)} → {item.toFare ? formatMoney(item.toFare) : t("ops.trips.voided")}
+              </span>
+              <span className="ml-2 text-muted-foreground">{formatDate(item.at)}</span>
+              <span className="block text-muted-foreground">{item.reason}</span>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="text-sm text-muted-foreground">{t("ops.trips.noCorrections")}</p>
+      )}
+      <p className="mt-2 text-xs text-muted-foreground">{t("ops.trips.correctionsNote")}</p>
+      {open && (
+        <Dialog title={t("ops.trips.correctTitle", { id: trip.id })} description={t("ops.trips.correctDetail")} onClose={() => setOpen(false)} closeLabel={t("common.close")}>
+          <form className="flex flex-col gap-3" onSubmit={(event) => void submit(event)}>
+            <Field id="correct-fare" label={t("ops.trips.correctFare")}>
+              <Input id="correct-fare" type="number" min={0} step={1} required inputMode="numeric" value={fare} onChange={(event) => setFare(event.target.value)} />
+            </Field>
+            <Field id="correct-reason" label={t("ops.trips.correctReason")}>
+              <Input id="correct-reason" required maxLength={200} value={reason} onChange={(event) => setReason(event.target.value)} />
+            </Field>
+            <div className="mt-2 flex justify-end gap-2">
+              <Button type="button" variant="outline" className="min-h-10" onClick={() => setOpen(false)}>
+                {t("ops.form.cancel")}
+              </Button>
+              <Button type="submit" className="min-h-10" disabled={busy || !reason.trim() || fare.trim() === "" || Number(fare) === trip.fare}>
+                {busy ? t("common.saving") : t("ops.trips.correctSave")}
+              </Button>
+            </div>
+          </form>
+        </Dialog>
+      )}
+    </Card>
   )
 }

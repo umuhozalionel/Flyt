@@ -1,12 +1,16 @@
 "use client"
 
-import { BadgeCheck, Phone, ShieldAlert, X } from "lucide-react"
-import { useState } from "react"
+import { BadgeCheck, KeyRound, MessageCircle, Phone, ShieldAlert, X } from "lucide-react"
+import { useEffect, useState } from "react"
+import { createPortal } from "react-dom"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { MapView } from "@/components/shared/map-view"
+import { ChatPanel } from "@/components/shared/chat-panel"
 import { Skeleton } from "@/components/shared/skeleton"
+import * as api from "@/lib/api"
 import { demoEmergencyNumber } from "@/lib/config"
+import { haptic } from "@/lib/haptics"
+import { useLive } from "@/lib/use-live"
 import { formatMoney, initials } from "@/lib/format"
 import { useT, type TranslationKey } from "@/lib/i18n"
 import { driveMinutes, kmBetween, minutesLeft, pickupMinutes } from "@/lib/eta"
@@ -28,11 +32,18 @@ export function TripScreen(props: {
 }) {
   const t = useT()
   const [showSos, setShowSos] = useState(false)
+  const [chatting, setChatting] = useState(false)
+  const [sharing, setSharing] = useState(false)
+  const pin = useLive(() => api.getTripPin(props.assignment.trip.id), ["trips"], [props.assignment.trip.id])
   // Mock demo only: drive the trip from here when the Dispatch demo toggle is on. Normally the driver app does it.
   const [demo] = useAutoDispatch()
   const { trip, driver, car, firm } = props.assignment
   const waitingForAccept = trip.status === "assigned"
   const canCancel = ["assigned", "driver_arriving", "driver_arrived"].includes(trip.status)
+  // A short buzz when the driver arrives and when the trip starts (phones that support it).
+  useEffect(() => {
+    if (trip.status === "driver_arrived" || trip.status === "in_progress") haptic("success")
+  }, [trip.status])
 
   const now = useNow(15_000)
   // Estimates from the driver's zone and the trip distance (see lib/eta.ts), counting down from when the driver set off.
@@ -51,7 +62,7 @@ export function TripScreen(props: {
           : t("rider.trip.arrivingIn", { min: toPickup })
 
   return (
-    <div className="px-5 pb-8 pt-5">
+    <div className="px-5 pb-6 pt-2">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm uppercase text-muted-foreground">{trip.status === "in_progress" ? t("rider.trip.onYourWay") : t("rider.trip.driverOnWay")}</p>
@@ -62,9 +73,18 @@ export function TripScreen(props: {
         </button>
       </div>
       <TripSteps status={trip.status} />
-      <div className="mt-5">
-        <MapView pickup={trip.pickup} dropoff={trip.dropoff} car={!!driver} />
-      </div>
+      {trip.status !== "in_progress" && pin.data && (
+        <div className="mt-4 flex items-center gap-3 rounded-2xl border border-primary/30 bg-primary/5 p-4">
+          <KeyRound className="size-5 shrink-0 text-primary" />
+          <span className="flex-1 text-sm">
+            <span className="block font-semibold">{t("pin.riderTitle")}</span>
+            <span className="block text-xs text-muted-foreground">{t("pin.riderNote")}</span>
+          </span>
+          <span className="font-mono text-2xl font-bold tracking-[0.3em]" aria-label={t("pin.label", { pin: pin.data.split("").join(" ") })}>
+            {pin.data}
+          </span>
+        </div>
+      )}
       {driver && car && firm ? (
         <div className="mt-4 rounded-2xl border bg-card p-4">
           <div className="flex items-center gap-3">
@@ -112,8 +132,24 @@ export function TripScreen(props: {
           <span className="text-xs text-muted-foreground">{t("rider.trip.dropoff")}</span>
         </div>
       </div>
-      <div className="mt-4 flex gap-2">
-        <Button variant="outline" className="min-h-12 flex-1" onClick={() => props.toast(t("rider.trip.shareReady"))}>
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        {driver && (
+          <Button variant="outline" className="col-span-2 min-h-12" onClick={() => setChatting(true)}>
+            <MessageCircle className="size-4" /> {t("chat.open", { name: driver.name.split(" ")[0] })}
+          </Button>
+        )}
+        <Button
+          variant="outline"
+          className="min-h-12 flex-1"
+          disabled={sharing}
+          onClick={() => {
+            setSharing(true)
+            void shareTrip(trip.id, t("share.text"))
+              .then((how) => props.toast(how === "copied" ? t("share.copied") : t("share.shared")))
+              .catch((error: unknown) => props.toast(error instanceof Error ? error.message : t("share.failed")))
+              .finally(() => setSharing(false))
+          }}
+        >
           {t("rider.trip.share")}
         </Button>
         <Button variant="outline" className="min-h-12 flex-1" onClick={() => setShowSos(true)}>
@@ -145,7 +181,11 @@ export function TripScreen(props: {
         </button>
       )}
       <p className="mt-4 text-center text-xs text-muted-foreground">{t("rider.trip.fareTax", { fare: formatMoney(trip.fare) })}</p>
-      {showSos && (
+      {chatting && driver && (
+        <ChatPanel tripId={trip.id} channel="rider_driver" me={{ sender: "rider", senderId: trip.riderId }} open otherName={driver.name.split(" ")[0]} onClose={() => setChatting(false)} toast={props.toast} />
+      )}
+      {showSos &&
+        createPortal(
         <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 p-4 sm:items-center">
           <section role="dialog" aria-modal="true" aria-labelledby="sos-heading" className="w-full max-w-sm rounded-3xl bg-background p-5">
             <div className="flex items-center justify-between">
@@ -171,8 +211,25 @@ export function TripScreen(props: {
             </Button>
             <p className="mt-3 text-center text-xs text-muted-foreground">{t("rider.sos.demoNote")}</p>
           </section>
-        </div>
-      )}
+        </div>,
+          document.body,
+        )}
     </div>
   )
+}
+
+/** Make a live trip-sharing link (read-only, stops working when the trip ends) and share or copy it. */
+async function shareTrip(tripId: string, text: string): Promise<"shared" | "copied"> {
+  const token = await api.createTripShare(tripId)
+  const url = `${window.location.origin}/share#${token}`
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: "Flyt", text, url })
+      return "shared"
+    } catch {
+      // Closed the share sheet: copy instead.
+    }
+  }
+  await navigator.clipboard.writeText(url)
+  return "copied"
 }

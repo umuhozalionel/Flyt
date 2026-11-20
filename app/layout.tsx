@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next"
 import { Providers } from "@/components/shared/providers"
 import { themeScript } from "@/components/shared/theme"
 import en from "@/lib/i18n/en"
+import "@fontsource-variable/inter"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -15,10 +16,16 @@ export const metadata: Metadata = {
     ],
     apple: "/apple-icon.png",
   },
+  // Installed on a phone's home screen: full screen, with the Flyt name.
+  appleWebApp: { capable: true, title: "Flyt", statusBarStyle: "default" },
+  applicationName: "Flyt",
 }
 
 export const viewport: Viewport = {
   colorScheme: "light dark",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#f8faf6" },
     { media: "(prefers-color-scheme: dark)", color: "#202923" },

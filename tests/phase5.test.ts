@@ -27,7 +27,7 @@ describe("invoices", () => {
       trip("e", "f1", "2026-11-12T08:00:00Z", 3000, 360, { companyId: "co1" }), // MoMo ride: not on the company invoice
     ]
     const firms = [{ id: "f1", status: "active" as const }, { id: "f2", status: "active" as const }, { id: "f3", status: "pending_licence" as const }]
-    const sent: FeeInvoice = { id: "FI-old", firmId: "f2", period: "2026-11", tripCount: 0, faresTotal: 0, feeTotal: 0, status: "sent" }
+    const sent: FeeInvoice = { id: "FI-old", firmId: "f2", period: "2026-11", tripCount: 0, faresTotal: 0, feeTotal: 0, status: "sent", lines: [], adjustments: [] }
     const first = generateInvoices("2026-11", firms, [{ id: "co1" }, { id: "co2" }], trips, [sent], [])
     // f1: trips a + e = 4,200 + 3,000 = 7,200 fares; fees 504 + 360 = 864. Trip b is December.
     expect(first.feeInvoices.find((invoice) => invoice.firmId === "f1")).toMatchObject({ tripCount: 2, faresTotal: 7200, feeTotal: 864, status: "draft" })
@@ -35,7 +35,7 @@ describe("invoices", () => {
     expect(first.feeInvoices.find((invoice) => invoice.firmId === "f2")).toEqual(sent)
     expect(first.feeInvoices.some((invoice) => invoice.firmId === "f3")).toBe(false)
     // co1 pays only for trip c (company account): 9,000. co2 has no trips: no invoice.
-    expect(first.companyInvoices).toEqual([{ id: "CI-2026-11-co1", companyId: "co1", period: "2026-11", tripCount: 1, total: 9000, status: "draft" }])
+    expect(first.companyInvoices).toMatchObject([{ id: "CI-2026-11-co1", companyId: "co1", period: "2026-11", tripCount: 1, total: 9000, status: "draft" }])
     expect(first).toMatchObject({ created: 2, refreshed: 0 })
 
     const more = [...trips, trip("f", "f1", "2026-11-20T08:00:00Z", 1950, 234)]
@@ -114,9 +114,11 @@ describe("pilot report", () => {
     //   3 cancelled of 17 finished → 17.6%. Rider 1 booked twice 14 days apart: 1 of 16 riders repeat → 6.3%.
     // Test: 12 completed, Rwf 104,015 over 72 car-days → 1,444.65 → 1,445; 12 ÷ 72 = 0.17.
     //   2 cancelled of 14 finished → 14.3%. 1 of 22 riders repeat → 4.5%.
+    // Waits (booking to driver arrived): Baseline 6+8+11+7+9+5+10+14+7+6+16+8+6+8 = 121 over 14 trips → 8.64 → 8.6 min.
+    //   Test 11+7+13+5+10+14+12+6+9+16+8+6+8+11+7 = 143 over 15 trips (3 still active today) → 9.53 → 9.5 min.
     const [baseline, testPlan] = report.plans
-    expect(baseline).toMatchObject({ completed: 14, fares: 188000, faresPerCarPerDay: 560, tripsPerCarPerDay: 0.04, cancellationPercent: 17.6, riders: 16, repeatRiders: 1, repeatPercent: 6.3, receipts: 14, sharedRuns: 3, seatsPerSharedTrip: 1, avgWaitMinutes: 9, incidents: 2 })
-    expect(testPlan).toMatchObject({ completed: 12, fares: 104015, faresPerCarPerDay: 1445, tripsPerCarPerDay: 0.17, cancellationPercent: 14.3, riders: 22, repeatRiders: 1, repeatPercent: 4.5, receipts: 12, sharedRuns: 3, seatsPerSharedTrip: 1, avgWaitMinutes: 9, incidents: 1 })
+    expect(baseline).toMatchObject({ completed: 14, fares: 188000, faresPerCarPerDay: 560, tripsPerCarPerDay: 0.04, cancellationPercent: 17.6, riders: 16, repeatRiders: 1, repeatPercent: 6.3, receipts: 14, sharedRuns: 3, seatsPerSharedTrip: 1, avgWaitMinutes: 8.6, incidents: 2 })
+    expect(testPlan).toMatchObject({ completed: 12, fares: 104015, faresPerCarPerDay: 1445, tripsPerCarPerDay: 0.17, cancellationPercent: 14.3, riders: 22, repeatRiders: 1, repeatPercent: 4.5, receipts: 12, sharedRuns: 3, seatsPerSharedTrip: 1, avgWaitMinutes: 9.5, incidents: 1 })
     // The chart has one bar per pilot day.
     expect(report.daily).toHaveLength(34)
   })

@@ -27,15 +27,8 @@ export function OverviewScreen() {
   return (
     <>
       <PageHeader title={t("ops.overview.title")} detail={t("ops.overview.detail")} />
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <Kpi label={t("ops.kpi.active")} value={kpis.activeTrips} />
-        <Kpi label={t("ops.kpi.online")} value={kpis.onlineDrivers} detail={t("ops.kpi.onTrip", { count: kpis.onTripDrivers })} />
-        <Kpi label={t("ops.kpi.waiting")} value={kpis.waitingRequests} detail={t("ops.kpi.scheduled", { count: kpis.scheduledRequests })} />
-        <Kpi label={t("ops.kpi.tripsToday")} value={kpis.tripsToday} detail={t("ops.kpi.completedOnly")} />
-        <Kpi label={t("ops.kpi.faresToday")} value={formatMoney(kpis.faresToday)} />
-        <Kpi label={t("ops.kpi.feesToday")} value={formatMoney(kpis.feesToday)} />
-      </div>
-      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1.4fr_1fr]">
+      {/* Map first: the live map leads the overview. */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.4fr_1fr]">
         <Card title={t("ops.overview.map")}>
           <FleetMap pins={pins} />
         </Card>
@@ -107,6 +100,14 @@ export function OverviewScreen() {
             )}
           </Card>
         </div>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <Kpi label={t("ops.kpi.active")} value={kpis.activeTrips} />
+        <Kpi label={t("ops.kpi.online")} value={kpis.onlineDrivers} detail={t("ops.kpi.onTrip", { count: kpis.onTripDrivers })} />
+        <Kpi label={t("ops.kpi.waiting")} value={kpis.waitingRequests} detail={t("ops.kpi.scheduled", { count: kpis.scheduledRequests })} />
+        <Kpi label={t("ops.kpi.tripsToday")} value={kpis.tripsToday} detail={t("ops.kpi.completedOnly")} />
+        <Kpi label={t("ops.kpi.faresToday")} value={formatMoney(kpis.faresToday)} />
+        <Kpi label={t("ops.kpi.feesToday")} value={formatMoney(kpis.feesToday)} />
       </div>
     </>
   )

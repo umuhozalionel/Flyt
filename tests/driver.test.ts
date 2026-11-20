@@ -102,7 +102,7 @@ describe("driver app data", () => {
     const offer = (await api.getOffers("driver-2")).find((item) => item.status === "pending")!
     expect((await api.respondOffer(offer.id, true)).status).toBe("driver_arriving")
     await api.driverArrived(booked.id)
-    await api.startTrip(booked.id)
+    await api.startTrip(booked.id, (await api.getTripPin(booked.id))!)
     const ended = await api.endTrip(booked.id)
     expect(ended).toMatchObject({ status: "completed", fare: 2700 }) // 1,200 + 2 × 750
     await api.riderMarkPaid(booked.id)

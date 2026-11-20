@@ -1,6 +1,6 @@
 "use client"
 
-import { Clock3, MapPin, Star, UserRound } from "lucide-react"
+import { Clock3, Heart, Home, MapPin, Star, UserRound } from "lucide-react"
 import Link from "next/link"
 import { useEffect, useState } from "react"
 import { StatusBadge } from "@/components/shared/status-badge"
@@ -10,11 +10,12 @@ import * as api from "@/lib/api"
 import { demoAutoDispatch } from "@/lib/config"
 import { formatDate, formatMoney, formatTime } from "@/lib/format"
 import { useT, type TranslationKey } from "@/lib/i18n"
-import { suggestDrivers } from "@/lib/ops"
+import { suggestDrivers, type SuggestionExtras } from "@/lib/ops"
 import { placeName } from "@/lib/places"
 import { reassignableStatuses } from "@/lib/trip-rules"
 import type { Trip } from "@/lib/types"
 import { useAutoDispatch } from "@/lib/use-demo"
+import { useLive } from "@/lib/use-live"
 import { useNow } from "@/lib/use-now"
 import { errorText, useOps } from "./ops-context"
 import { useOpsData, type OpsData } from "./ops-data"
@@ -24,7 +25,9 @@ import { CancelTripDialog, LoadError, Loading, PageHeader } from "./ops-ui"
 export function DispatchScreen() {
   const t = useT()
   const { data, error } = useOpsData()
-  const { scope, toast } = useOps()
+  const { scope, toast, admin, isPlatform } = useOps()
+  const preferences = useLive(() => api.getDriverPreferences(), ["extras"])
+  const favourites = useLive(() => (isPlatform ? api.getFavouriteDrivers() : Promise.resolve([])), ["extras"], [isPlatform])
   const now = useNow()
   const [busy, setBusy] = useState<string>()
   const [cancelling, setCancelling] = useState<string>()
@@ -72,13 +75,15 @@ export function DispatchScreen() {
       onAssign={(driverId) =>
         void run(
           `${trip.id}-${driverId}`,
-          () => (reassignableStatuses.includes(trip.status) ? api.reassignDriver(trip.id, driverId) : api.assignDriver(trip.id, driverId)),
+          () => (reassignableStatuses.includes(trip.status) ? api.reassignDriver(trip.id, driverId, admin?.id) : api.assignDriver(trip.id, driverId, admin?.id)),
           t(reassignableStatuses.includes(trip.status) ? "ops.dispatch.reassigned" : "ops.dispatch.assigned", { id: trip.id }),
         ).then((ok) => ok && setReassigning(undefined))
       }
       onDemoAccept={(offerId) => void run(`${trip.id}-accept`, () => api.respondOffer(offerId, true), t("ops.dispatch.accepted", { id: trip.id }))}
       onCancel={() => setCancelling(trip.id)}
       scopeFirm={scope.firmId}
+      canAssign={isPlatform}
+      extras={{ preferences: preferences.data, favourites: favourites.data }}
       demo={auto}
     />
   )
@@ -140,6 +145,9 @@ function DispatchCard(props: {
   busy?: string
   reassigning: boolean
   scopeFirm?: string
+  /** Platform admins dispatch from the open queue; firm admins only reassign trips already given to their firm. */
+  canAssign: boolean
+  extras: SuggestionExtras
   /** Mock demo toggle is on: show the button that accepts for the driver. */
   demo: boolean
   onReassignToggle: () => void
@@ -157,8 +165,8 @@ function DispatchCard(props: {
   const secondsLeft = offer ? Math.max(0, Math.ceil((Date.parse(offer.expiresAt) - now) / 1000)) : undefined
   const waitingMinutes = Math.max(0, Math.floor((now - Date.parse(trip.createdAt)) / 60_000))
   const needsDriver = trip.status === "requested" || trip.status === "scheduled"
-  const showSuggestions = needsDriver || props.reassigning
-  const suggestions = showSuggestions ? suggestDrivers(trip, data.drivers, data.cars, data.allFirms, { firmId: props.scopeFirm }) : []
+  const showSuggestions = (needsDriver && props.canAssign) || props.reassigning
+  const suggestions = showSuggestions ? suggestDrivers(trip, data.drivers, data.cars, data.allFirms, { firmId: props.scopeFirm }, 3, props.extras) : []
 
   return (
     <article className="rounded-2xl border bg-card p-4" aria-label={t("ops.dispatch.tripLabel", { id: trip.id })}>
@@ -212,6 +220,20 @@ function DispatchCard(props: {
                       <Star className="size-3 fill-amber-400 text-amber-400" /> {row.driver.rating.toFixed(1)} · {placeName(row.driver.zone)} · {row.km === 0 ? t("ops.dispatch.atPickup") : t("ops.dispatch.kmAway", { km: row.km })}
                       {row.firm.id !== trip.firmId && <> · {row.firm.name}</>}
                     </span>
+                    {(row.favourite || row.headingHome) && (
+                      <span className="mt-0.5 flex flex-wrap gap-2 text-xs">
+                        {row.favourite && (
+                          <span className="flex items-center gap-1 text-rose-600">
+                            <Heart className="size-3 fill-rose-500" /> {t("ops.dispatch.favourite")}
+                          </span>
+                        )}
+                        {row.headingHome && (
+                          <span className="flex items-center gap-1 text-primary">
+                            <Home className="size-3" /> {t("ops.dispatch.headingHome")}
+                          </span>
+                        )}
+                      </span>
+                    )}
                   </span>
                   <Button className="min-h-10 min-w-24" variant={index === 0 ? "default" : "outline"} disabled={!!props.busy} onClick={() => props.onAssign(row.driver.id)}>
                     {props.busy === `${trip.id}-${row.driver.id}` ? t("common.saving") : t(needsDriver ? "ops.dispatch.assign" : "ops.dispatch.reassignTo")}
@@ -224,8 +246,9 @@ function DispatchCard(props: {
           )}
         </div>
       )}
+      {needsDriver && !props.canAssign && <p className="mt-3 rounded-xl bg-secondary p-3 text-sm text-muted-foreground">{t("ops.dispatch.openQueueNote")}</p>}
       <div className="mt-3 flex flex-wrap gap-2">
-        {reassignableStatuses.includes(trip.status) && (
+        {reassignableStatuses.includes(trip.status) && (props.canAssign || driver?.firmId === props.scopeFirm) && (
           <Button variant="outline" className="min-h-10" disabled={!!props.busy} onClick={props.onReassignToggle} aria-expanded={props.reassigning}>
             {props.reassigning ? t("ops.dispatch.hideReassign") : t("ops.dispatch.reassign")}
           </Button>

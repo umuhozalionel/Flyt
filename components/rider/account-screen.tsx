@@ -1,8 +1,10 @@
 "use client"
 
-import { ArrowRight, FileCheck2, Globe2, Headphones, LogOut, MapPin, Phone, ShieldCheck, WalletCards } from "lucide-react"
+import { ArrowRight, BadgeCheck, FileCheck2, Gift, Globe2, Headphones, LogOut, MapPin, Phone, ShieldCheck, WalletCards } from "lucide-react"
 import { ThemeToggle } from "@/components/shared/theme"
+import * as api from "@/lib/api"
 import { supportEmail } from "@/lib/config"
+import { useLive } from "@/lib/use-live"
 import { formatPhone, initials } from "@/lib/format"
 import { languages, useT } from "@/lib/i18n"
 import type { Company, Language, Rider } from "@/lib/types"
@@ -19,6 +21,8 @@ export function AccountScreen(props: {
 }) {
   const t = useT()
   const { rider, company, toast } = props
+  const points = useLive(() => api.getRewardPoints(rider.id), ["trips", "extras"], [rider.id])
+  const settings = useLive(() => api.getSettings(), ["extras"])
   const rows = [
     { icon: MapPin, label: t("rider.account.places"), detail: t("rider.account.placesCount", { count: rider.savedPlaces.length }), action: props.onPlaces },
     { icon: WalletCards, label: t("rider.account.payment"), detail: t("rider.account.paymentDetail"), action: () => toast(t("rider.account.paymentNote")) },
@@ -33,7 +37,14 @@ export function AccountScreen(props: {
       <div className="mt-5 flex items-center gap-4 rounded-2xl border bg-card p-4">
         <span className="grid size-14 place-items-center rounded-full bg-primary/10 text-lg font-bold text-primary">{initials(rider.name)}</span>
         <span>
-          <span className="block font-semibold">{rider.name}</span>
+          <span className="flex items-center gap-1.5 font-semibold">
+            {rider.name}
+            {company?.status === "active" && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                <BadgeCheck className="size-3.5" /> {t("verified.badge")}
+              </span>
+            )}
+          </span>
           <span className="text-sm text-muted-foreground">{formatPhone(rider.phone)}</span>
         </span>
         <button onClick={props.onEdit} className="ml-auto min-h-11 rounded-lg px-3 py-2 text-sm text-primary">
@@ -47,6 +58,13 @@ export function AccountScreen(props: {
           <p className="mt-1 text-sm text-muted-foreground">{t("rider.account.companyNote")}</p>
         </div>
       )}
+      <div className="mt-4 rounded-2xl border bg-card p-4">
+        <p className="flex items-center gap-2 text-xs uppercase text-muted-foreground">
+          <Gift className="size-4 text-primary" /> {t("points.title")}
+        </p>
+        <p className="mt-1 text-2xl font-semibold tabular-nums">{points.data ? t("points.total", { points: points.data.total }) : "…"}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{t("points.note", { rate: settings.data?.pointsPer1000Rwf ?? 1 })}</p>
+      </div>
       <div className="mt-5 flex flex-col divide-y rounded-2xl border bg-card">
         {rows.map(({ icon: Icon, label, detail, action }) => (
           <button key={label} onClick={action} className="flex min-h-14 items-center gap-3 px-4 text-left">

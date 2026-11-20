@@ -5,6 +5,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import type { ReactNode } from "react"
 import { Logo } from "@/components/shared/logo"
+import { NotificationBell } from "@/components/shared/notification-center"
 import { ThemeToggle } from "@/components/shared/theme"
 import { Toast } from "@/components/shared/toast"
 import { Select } from "@/components/ui/input"
@@ -24,7 +25,7 @@ const nav: { href: string; label: TranslationKey; icon: typeof Radio; platform?:
   { href: "/ops/riders", label: "ops.nav.riders", icon: Users, platform: true },
   { href: "/ops/companies", label: "ops.nav.companies", icon: Briefcase, platform: true },
   { href: "/ops/commutes", label: "ops.nav.commutes", icon: Route, platform: true },
-  { href: "/ops/pricing", label: "ops.nav.pricing", icon: BadgeDollarSign, platform: true },
+  { href: "/ops/pricing", label: "ops.nav.pricing", icon: BadgeDollarSign },
   { href: "/ops/invoices", label: "ops.nav.invoices", icon: FileText },
   { href: "/ops/report", label: "ops.nav.report", icon: Presentation },
   { href: "/ops/incidents", label: "ops.nav.incidents", icon: ShieldAlert },
@@ -40,16 +41,18 @@ function useNav() {
 export function OpsShell({ children }: { children: ReactNode }) {
   const { message, toast, clear } = useToastMessage()
   return (
-    <OpsProvider toast={toast}>
-      <div className="min-h-screen bg-background text-foreground lg:grid lg:grid-cols-[232px_1fr]">
-        <Sidebar />
-        <div className="min-w-0">
-          <TopBar />
-          <main className="mx-auto max-w-7xl px-4 pb-16 pt-5 sm:px-6">{children}</main>
+    <>
+      <OpsProvider toast={toast}>
+        <div className="min-h-screen bg-background text-foreground lg:grid lg:grid-cols-[232px_1fr]">
+          <Sidebar />
+          <div className="min-w-0">
+            <TopBar />
+            <main className="mx-auto max-w-7xl px-4 pb-16 pt-5 sm:px-6">{children}</main>
+          </div>
         </div>
-      </div>
+      </OpsProvider>
       {message && <Toast message={message} onClose={clear} />}
-    </OpsProvider>
+    </>
   )
 }
 
@@ -109,6 +112,7 @@ function TopBar() {
               </option>
             ))}
           </Select>
+          {admin && <NotificationBell viewer={{ kind: "admin", id: admin.id }} />}
           <ThemeToggle />
         </div>
       </div>

@@ -49,7 +49,7 @@ describe("trip flow", () => {
     const accepted = await api.respondOffer((await pendingOffer(trip.id)).id, true)
     expect(accepted.status).toBe("driver_arriving")
     expect((await api.driverArrived(trip.id)).arrivedAt).toBeDefined()
-    expect((await api.startTrip(trip.id)).startedAt).toBeDefined()
+    expect((await api.startTrip(trip.id, (await api.getTripPin(trip.id))!)).startedAt).toBeDefined()
     const ended = await api.endTrip(trip.id)
     expect(ended).toMatchObject({ status: "completed", fare: 1575 }) // 1.5 km on Test: 1,200 + 0.5 × 750
     expect(ended.receiptNo).toMatch(/^EBM-/)
@@ -59,7 +59,7 @@ describe("trip flow", () => {
   })
   test("blocked moves are rejected", async () => {
     const trip = await api.createBooking({ riderId: "rider-20", pickup: "remera", dropoff: "kcc", type: "private", paymentMethod: "momo" })
-    await expect(api.startTrip(trip.id)).rejects.toBeInstanceOf(TransitionError)
+    await expect(api.startTrip(trip.id, (await api.getTripPin(trip.id))!)).rejects.toBeInstanceOf(TransitionError)
     await expect(api.endTrip(trip.id)).rejects.toBeInstanceOf(TransitionError)
   })
   test("a declined offer sends the trip back to requested", async () => {

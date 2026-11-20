@@ -5,6 +5,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import type { ReactNode } from "react"
 import { Logo } from "@/components/shared/logo"
+import { NotificationBell } from "@/components/shared/notification-center"
 import { ThemeToggle } from "@/components/shared/theme"
 import { Toast, useToastMessage } from "@/components/shared/toast"
 import { Select } from "@/components/ui/input"
@@ -26,14 +27,16 @@ export function CompanyShell({ children }: { children: ReactNode }) {
   const t = useT()
   const { message, toast, clear } = useToastMessage()
   return (
-    <CompanyProvider toast={toast}>
-      <div className="min-h-screen bg-background text-foreground">
-        <TopBar />
-        <main className="mx-auto max-w-6xl px-4 pb-16 pt-5 sm:px-6">{children}</main>
-        <footer className="mx-auto max-w-6xl px-4 pb-6 text-xs text-muted-foreground sm:px-6">{t("common.copyright")}</footer>
-      </div>
+    <>
+      <CompanyProvider toast={toast}>
+        <div className="min-h-screen bg-background text-foreground">
+          <TopBar />
+          <main className="mx-auto max-w-6xl px-4 pb-16 pt-5 sm:px-6">{children}</main>
+          <footer className="mx-auto max-w-6xl px-4 pb-6 text-xs text-muted-foreground sm:px-6">{t("common.copyright")}</footer>
+        </div>
+      </CompanyProvider>
       {message && <Toast message={message} onClose={clear} />}
-    </CompanyProvider>
+    </>
   )
 }
 
@@ -61,6 +64,7 @@ function TopBar() {
               </option>
             ))}
           </Select>
+          {admin && <NotificationBell viewer={{ kind: "admin", id: admin.id }} portalLink="/company" />}
           <ThemeToggle />
         </div>
       </div>

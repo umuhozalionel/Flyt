@@ -4,6 +4,11 @@ export function formatMoney(amount: number) {
   return `Rwf ${Math.round(amount).toLocaleString("en-US")}`
 }
 
+/** A difference in Rwf with its sign, e.g. "+ Rwf 500" or "− Rwf 1,200". */
+export function formatMoneyChange(amount: number) {
+  return `${amount > 0 ? "+ " : amount < 0 ? "− " : ""}${formatMoney(Math.abs(amount))}`
+}
+
 /**
  * Normalise a Rwandan phone number to "+250 7XX XXX XXX".
  * Accepts "0788 123 456", "788123456", "250788123456" and "+250 788 123 456".

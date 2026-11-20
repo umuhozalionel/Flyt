@@ -1,6 +1,8 @@
 "use client"
 
+import { MessageCircle } from "lucide-react"
 import { useState } from "react"
+import { ChatPanel } from "@/components/shared/chat-panel"
 import { StatusBadge } from "@/components/shared/status-badge"
 import { Field, Select } from "@/components/ui/input"
 import { Table, TBody, Td, Th, THead, Tr } from "@/components/ui/table"
@@ -9,6 +11,7 @@ import { useT, type TranslationKey } from "@/lib/i18n"
 import { tripDay } from "@/lib/ops"
 import { placeName } from "@/lib/places"
 import { kigaliMonth } from "@/lib/time"
+import { useCompany } from "./company-context"
 import { useCompanyData } from "./company-data"
 import { Card, LoadError, NoCompany, PageHeader } from "./company-ui"
 
@@ -18,6 +21,8 @@ export function CompanyTrips() {
   const { data, error } = useCompanyData()
   const [month, setMonth] = useState(kigaliMonth())
   const [person, setPerson] = useState("")
+  const [chatTrip, setChatTrip] = useState<string>()
+  const { admin, toast } = useCompany()
   if (error && !data) return <LoadError error={error} />
   if (!data) return <NoCompany />
   const months = [...new Set([kigaliMonth(), ...data.trips.map((trip) => tripDay(trip).slice(0, 7))])].sort().reverse()
@@ -77,6 +82,11 @@ export function CompanyTrips() {
                   <Td className="text-right font-semibold tabular-nums">{formatMoney(trip.fare)}</Td>
                   <Td>
                     <StatusBadge status={trip.status} />
+                    {admin && trip.paymentMethod === "company_account" && trip.driverId && ["assigned", "driver_arriving", "driver_arrived", "in_progress"].includes(trip.status) && (
+                      <button onClick={() => setChatTrip(trip.id)} className="mt-1 flex min-h-9 items-center gap-1 text-xs font-semibold text-primary">
+                        <MessageCircle className="size-3.5" /> {t("chat.openDriver")}
+                      </button>
+                    )}
                   </Td>
                 </Tr>
               ))}
@@ -87,6 +97,7 @@ export function CompanyTrips() {
         )}
       </Card>
       <p className="mt-3 text-xs text-muted-foreground">{t("company.privacyNote")}</p>
+      {chatTrip && admin && <ChatPanel tripId={chatTrip} channel="company_driver" me={{ sender: "company", senderId: admin.id }} open otherName={t("chat.driverName")} onClose={() => setChatTrip(undefined)} toast={toast} />}
     </>
   )
 }

@@ -2,14 +2,20 @@
 
 import Link from "next/link"
 import { ArrowLeft, Clock3, Home, UserRound, WifiOff } from "lucide-react"
-import { useCallback, useMemo, useState } from "react"
+import { AnimatePresence, motion } from "motion/react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Logo } from "@/components/shared/logo"
+import { MapSheet } from "@/components/shared/map-sheet"
+import { NotificationBell } from "@/components/shared/notification-center"
 import { Skeleton } from "@/components/shared/skeleton"
 import { Toast, useToastMessage } from "@/components/shared/toast"
 import * as api from "@/lib/api"
-import { demoRiderId } from "@/lib/config"
+import { dataSource, demoRiderId } from "@/lib/config"
 import { initials } from "@/lib/format"
-import { useLanguage, useT } from "@/lib/i18n"
+import { haptic } from "@/lib/haptics"
+import { nearestPlace } from "@/lib/map"
+import { useLocation } from "@/lib/use-location"
+import { useLanguage, useT, type TranslationKey } from "@/lib/i18n"
 import { firmsOffering, quoteFare } from "@/lib/pricing"
 import { activeStatuses, cancelledStatuses } from "@/lib/trip-rules"
 import { useAutoDispatch } from "@/lib/use-demo"
@@ -24,6 +30,7 @@ import { EmergencyContactsScreen } from "./emergency-contacts-screen"
 import { FindingScreen } from "./finding-screen"
 import { HomeScreen } from "./home-screen"
 import { ReceiptScreen } from "./receipt-screen"
+import { RiderMap } from "./rider-map"
 import { SavedPlacesScreen } from "./saved-places-screen"
 import { SignInScreen } from "./sign-in-screen"
 import { TripDetailScreen } from "./trip-detail-screen"
@@ -48,7 +55,12 @@ function screenFor(trip: Trip): Screen {
 }
 
 /** Where a back arrow goes from each screen. */
-const backTo: Partial<Record<Screen, Screen>> = { book: "home", detail: "trips", receipt: "home", places: "account", contacts: "account", signin: "account" }
+const backTo: Partial<Record<Screen, Screen>> = { book: "home", detail: "trips", receipt: "home", places: "account", contacts: "account", signin: "home" }
+
+/** Screens drawn over the full-screen map, in a bottom sheet. */
+const mapScreens: Screen[] = ["home", "book", "finding", "trip"]
+/** Screens a signed-out rider can use: the map and the booking form. Booking itself asks for sign-in. */
+const openScreens: Screen[] = ["home", "book", "signin"]
 
 export default function RiderApp() {
   const t = useT()
@@ -57,12 +69,19 @@ export default function RiderApp() {
   // Mock demo: Ops can turn this off on Dispatch to assign bookings by hand.
   const [autoAssign] = useAutoDispatch()
   const [screen, setScreen] = useState<Screen>("home")
-  const [riderId, setRiderId] = useStored<string>(RIDER_KEY, demoRiderId)
+  // The demo starts signed in as a sample rider; with Supabase, riders sign in with their phone first.
+  const startRider = dataSource === "mock" ? demoRiderId : ""
+  const [riderId, setRiderId] = useStored<string>(RIDER_KEY, startRider)
   const [tripId, setTripId] = useState<string>()
   const [busy, setBusy] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [draft, setDraftState] = useState<BookingDraft>({ pickup: "kimihurura", dropoff: "kcc", type: "private", payment: "momo", schedule: false, scheduledFor: "", hireQuantity: 1 })
   const { message, toast, clear } = useToastMessage()
+  // Where to go after signing in: back to the booking when sign-in was asked for to book.
+  const [afterSignIn, setAfterSignIn] = useState<Screen>("home")
+  const [sheetHeight, setSheetHeight] = useState(0)
+  const location = useLocation()
+  const pickupFromLocation = useRef(false)
 
   // Airport is only offered when one end is the airport; moving both ends away falls back to Private.
   const setDraft = useCallback(
@@ -98,6 +117,17 @@ export default function RiderApp() {
     else if (screen === "trip" && status === "completed") shown = "complete"
     else if (screen === "trip" && (cancelledStatuses.includes(status) || status === "requested")) shown = status === "requested" ? "finding" : "detail"
   }
+  // Map first: a signed-out rider sees the map and the booking form. Sign-in is asked for only when they book.
+  const signedOut = !riderId || (!riderData.loading && !rider)
+  if (signedOut && !openScreens.includes(shown)) shown = "signin"
+
+  // Once the rider shares their location, the pickup starts at the nearest of our places (they can change it).
+  useEffect(() => {
+    if (!location.position || pickupFromLocation.current) return
+    pickupFromLocation.current = true
+    const pickup = nearestPlace(location.position)
+    setDraft({ pickup, dropoff: draft.dropoff === pickup ? draft.pickup : draft.dropoff })
+  }, [location.position, setDraft, draft.dropoff, draft.pickup])
 
   // Price preview for each ride type, from the active plan and the firm that would run it.
   const quotes = useMemo(() => {
@@ -120,6 +150,8 @@ export default function RiderApp() {
   function go(next: Screen) {
     setCancelling(false)
     setScreen(next)
+    // Signed out and opening Trips or Account: after signing in, land where they were going.
+    if (signedOut && !openScreens.includes(next)) setAfterSignIn(next)
   }
 
   function openTrip(trip: Trip) {
@@ -149,8 +181,14 @@ export default function RiderApp() {
     if (draft.pickup === draft.dropoff && draft.type !== "hourly" && draft.type !== "daily") return toast(t("rider.book.samePlace"))
     if (draft.schedule && !draft.scheduledFor) return toast(t("rider.book.pickTime"))
     if (draft.schedule && Date.parse(draft.scheduledFor) <= Date.now()) return toast(t("rider.book.pastTime"))
-    if (!rider) return
+    if (!rider) {
+      setAfterSignIn("book")
+      go("signin")
+      toast(t("rider.signin.toBook"))
+      return
+    }
     setBusy(true)
+    haptic("light")
     try {
       const created = await api.createBooking({
         riderId: rider.id,
@@ -190,13 +228,14 @@ export default function RiderApp() {
     }
   }
 
-  async function signIn(input: { phone: string; name: string; consent: boolean; joinCode?: string }) {
+  async function signIn(input: { phone: string; code: string; name: string; consent: boolean; joinCode?: string }) {
     setBusy(true)
     try {
-      const signedIn = await api.signInRider({ phone: input.phone, name: input.name || undefined, consent: input.consent, joinCode: input.joinCode })
+      const signedIn = await api.signInRider({ phone: input.phone, code: input.code, name: input.name || undefined, consent: input.consent, joinCode: input.joinCode })
       setRiderId(signedIn.id)
       setLanguage(signedIn.language)
-      go("home")
+      go(afterSignIn)
+      setAfterSignIn("home")
       toast(t("rider.signin.welcome"))
     } catch (error) {
       toast(errorText(error, t("rider.signin.failed")))
@@ -224,23 +263,131 @@ export default function RiderApp() {
 
   const back = backTo[shown] ?? "home"
   const needsTrip = ["finding", "trip", "complete", "receipt", "detail"].includes(shown)
+  const onMap = mapScreens.includes(shown)
+
+  const content =
+    !rider && !signedOut && shown !== "signin" ? (
+      <div className="flex flex-col gap-3 px-5 pt-6" aria-busy>
+        <Skeleton className="h-10 w-2/3" />
+        <Skeleton className="h-16" />
+        <Skeleton className="h-24" />
+      </div>
+    ) : needsTrip && !current ? (
+      <div className="flex flex-col gap-3 px-5 pt-6" aria-busy>
+        <Skeleton className="h-24" />
+        <Skeleton className="h-32" />
+      </div>
+    ) : (
+      <>
+        {shown === "home" && (
+          <HomeScreen
+            rider={rider}
+            recentTrips={trips.data}
+            activeTrip={bannerTrip}
+            onBook={() => go("book")}
+            onSavedPlace={(placeId) => {
+              setDraft({ dropoff: placeId })
+              go("book")
+            }}
+            onOpenTrip={openTrip}
+            onOpenActive={() => bannerTrip && openTrip(bannerTrip)}
+            onSeeAll={() => go("trips")}
+            onAddPlace={() => go("places")}
+          />
+        )}
+        {shown === "book" && <BookScreen draft={draft} setDraft={setDraft} quotes={quotes} etas={etas.data} company={company} routeName={route?.name} offline={!online} busy={busy} signedOut={!rider} onConfirm={() => void bookRide()} />}
+        {shown === "finding" && current && <FindingScreen trip={current.trip} onCancel={() => setCancelling(true)} onEdit={() => go("book")} onHome={() => go("home")} />}
+        {shown === "trip" && current && (
+          <TripScreen
+            assignment={current}
+            busy={busy}
+            onArrived={() => void run(() => api.driverArrived(current.trip.id))}
+            onStart={() => void run(async () => api.startTrip(current.trip.id, (await api.getTripPin(current.trip.id)) ?? ""))}
+            onEnd={() => void run(() => api.endTrip(current.trip.id), () => go("complete"))}
+            onCancel={() => setCancelling(true)}
+            onSos={() =>
+              run(
+                () => api.reportIncident({ type: "safety", tripId: current.trip.id, reportedBy: "rider", description: t("rider.sos.incident") }),
+                () => toast(t("rider.sos.notified")),
+                t("rider.sos.failed"),
+              )
+            }
+            toast={toast}
+          />
+        )}
+        {shown === "complete" && current && rider && (
+          <CompleteScreen
+            assignment={current}
+            rider={rider}
+            company={company}
+            busy={busy}
+            onPaid={() => run(() => api.riderMarkPaid(current.trip.id), () => toast(t("rider.complete.paymentNoted")), t("rider.complete.payFailed"))}
+            onRate={(rating, tags, comment) =>
+              run(
+                () => api.rateTrip(current.trip.id, rating, tags, comment),
+                () => {
+                  go("receipt")
+                  toast(t("rider.rate.thanks"))
+                },
+              )
+            }
+            onSkip={() => go("receipt")}
+            toast={toast}
+          />
+        )}
+        {shown === "receipt" && current && <ReceiptScreen assignment={current} onDone={() => go("home")} toast={toast} />}
+        {shown === "detail" && current && <TripDetailScreen assignment={current} rider={rider} toast={toast} companyName={company?.name} onLive={() => go(screenFor(current.trip))} onReceipt={() => go("receipt")} onPay={() => go("complete")} onCancel={() => setCancelling(true)} />}
+        {shown === "trips" && <TripsScreen trips={trips.data} onOpen={openTrip} onBook={() => go("book")} />}
+        {shown === "account" && rider && (
+          <AccountScreen
+            rider={rider}
+            company={company}
+            onEdit={() => go("signin")}
+            onPlaces={() => go("places")}
+            onContacts={() => go("contacts")}
+            onLanguage={changeLanguage}
+            onSignOut={() => {
+              if (dataSource === "supabase") void api.signOut()
+              setRiderId(startRider)
+              go("home")
+            }}
+            toast={toast}
+          />
+        )}
+        {shown === "places" && rider && <SavedPlacesScreen rider={rider} busy={busy} onSave={(savedPlaces) => run(() => api.updateRider(rider.id, { savedPlaces }), () => toast(t("common.saved")))} />}
+        {shown === "contacts" && rider && <EmergencyContactsScreen rider={rider} busy={busy} onSave={(emergencyContacts) => run(() => api.updateRider(rider.id, { emergencyContacts }), () => toast(t("common.saved")))} toast={toast} />}
+        {shown === "signin" && <SignInScreen busy={busy} onSubmit={(input) => void signIn(input)} toast={toast} />}
+      </>
+    )
+
+  // Each screen fades and rises in; with "reduce motion" on, MotionConfig in Providers turns the movement off.
+  const animated = (
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.div key={shown} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.16, ease: "easeOut" }}>
+        {content}
+      </motion.div>
+    </AnimatePresence>
+  )
 
   return (
-    <main className="min-h-screen bg-secondary/45 pb-24 text-foreground md:pb-8">
+    <main className={`min-h-screen bg-secondary/45 text-foreground ${onMap ? "" : "pb-24 md:pb-8"}`}>
       <div className="mx-auto min-h-screen w-full max-w-[430px] border-x bg-background shadow-sm">
         <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b bg-background/95 px-5 backdrop-blur">
           <Link href="/" aria-label={t("common.homeLink")}>
             <Logo small />
           </Link>
-          {shown !== "home" ? (
-            <button onClick={() => go(back)} className="grid size-11 place-items-center rounded-full hover:bg-secondary" aria-label={t("common.back")}>
-              <ArrowLeft className="size-5" />
-            </button>
-          ) : (
-            <button onClick={() => go("account")} className="grid size-11 place-items-center rounded-full bg-secondary" aria-label={t("rider.nav.account")}>
-              <span className="text-sm font-bold">{rider ? initials(rider.name) : ""}</span>
-            </button>
-          )}
+          <span className="flex items-center gap-1">
+            {rider && <NotificationBell viewer={{ kind: "rider", id: rider.id }} />}
+            {shown !== "home" ? (
+              <button onClick={() => go(back)} className="grid size-11 place-items-center rounded-full hover:bg-secondary" aria-label={t("common.back")}>
+                <ArrowLeft className="size-5" />
+              </button>
+            ) : (
+              <button onClick={() => go("account")} className="grid size-11 place-items-center rounded-full bg-secondary" aria-label={t("rider.nav.account")}>
+                {rider ? <span className="text-sm font-bold">{initials(rider.name)}</span> : <UserRound className="size-5" />}
+              </button>
+            )}
+          </span>
         </header>
         {!online && (
           <div role="status" className="flex items-center gap-2 bg-destructive/10 px-5 py-2 text-sm text-destructive">
@@ -248,101 +395,15 @@ export default function RiderApp() {
           </div>
         )}
 
-        {!rider && shown !== "signin" ? (
-          riderData.data === undefined && !riderData.loading ? (
-            <SignInScreen busy={busy} onSubmit={(input) => void signIn(input)} toast={toast} />
-          ) : (
-            <div className="flex flex-col gap-3 px-5 pt-6" aria-busy>
-              <Skeleton className="h-10 w-2/3" />
-              <Skeleton className="h-16" />
-              <Skeleton className="h-48" />
-            </div>
-          )
-        ) : needsTrip && !current ? (
-          <div className="flex flex-col gap-3 px-5 pt-6" aria-busy>
-            <Skeleton className="h-48" />
-            <Skeleton className="h-32" />
+        {onMap ? (
+          <div className="relative h-[calc(100dvh-8.5rem)] overflow-hidden md:h-[calc(100dvh-9.5rem)]">
+            <RiderMap screen={shown} draft={draft} current={current} me={location.position} location={location.state} onLocate={location.request} sheetHeight={sheetHeight} />
+            <MapSheet key={shown === "home" ? "home" : "trip"} label={t(`rider.sheet.${shown}` as TranslationKey)} maxShare={shown === "home" ? 0.6 : 0.7} onHeight={setSheetHeight}>
+              {animated}
+            </MapSheet>
           </div>
         ) : (
-          <>
-            {shown === "home" && rider && (
-              <HomeScreen
-                rider={rider}
-                recentTrips={trips.data}
-                activeTrip={bannerTrip}
-                onBook={() => go("book")}
-                onSavedPlace={(placeId) => {
-                  setDraft({ dropoff: placeId })
-                  go("book")
-                }}
-                onOpenTrip={openTrip}
-                onOpenActive={() => bannerTrip && openTrip(bannerTrip)}
-                onSeeAll={() => go("trips")}
-                onAddPlace={() => go("places")}
-              />
-            )}
-            {shown === "book" && <BookScreen draft={draft} setDraft={setDraft} quotes={quotes} etas={etas.data} company={company} routeName={route?.name} offline={!online} busy={busy} onConfirm={() => void bookRide()} />}
-            {shown === "finding" && current && <FindingScreen trip={current.trip} onCancel={() => setCancelling(true)} onEdit={() => go("book")} onHome={() => go("home")} />}
-            {shown === "trip" && current && (
-              <TripScreen
-                assignment={current}
-                busy={busy}
-                onArrived={() => void run(() => api.driverArrived(current.trip.id))}
-                onStart={() => void run(() => api.startTrip(current.trip.id))}
-                onEnd={() => void run(() => api.endTrip(current.trip.id), () => go("complete"))}
-                onCancel={() => setCancelling(true)}
-                onSos={() =>
-                  run(
-                    () => api.reportIncident({ type: "safety", tripId: current.trip.id, reportedBy: "rider", description: t("rider.sos.incident") }),
-                    () => toast(t("rider.sos.notified")),
-                    t("rider.sos.failed"),
-                  )
-                }
-                toast={toast}
-              />
-            )}
-            {shown === "complete" && current && rider && (
-              <CompleteScreen
-                assignment={current}
-                rider={rider}
-                company={company}
-                busy={busy}
-                onPaid={() => run(() => api.riderMarkPaid(current.trip.id), () => toast(t("rider.complete.paymentNoted")), t("rider.complete.payFailed"))}
-                onRate={(rating, tags, comment) =>
-                  run(
-                    () => api.rateTrip(current.trip.id, rating, tags, comment),
-                    () => {
-                      go("receipt")
-                      toast(t("rider.rate.thanks"))
-                    },
-                  )
-                }
-                onSkip={() => go("receipt")}
-                toast={toast}
-              />
-            )}
-            {shown === "receipt" && current && <ReceiptScreen assignment={current} onDone={() => go("home")} toast={toast} />}
-            {shown === "detail" && current && <TripDetailScreen assignment={current} companyName={company?.name} onLive={() => go(screenFor(current.trip))} onReceipt={() => go("receipt")} onPay={() => go("complete")} onCancel={() => setCancelling(true)} />}
-            {shown === "trips" && <TripsScreen trips={trips.data} onOpen={openTrip} onBook={() => go("book")} />}
-            {shown === "account" && rider && (
-              <AccountScreen
-                rider={rider}
-                company={company}
-                onEdit={() => go("signin")}
-                onPlaces={() => go("places")}
-                onContacts={() => go("contacts")}
-                onLanguage={changeLanguage}
-                onSignOut={() => {
-                  setRiderId(demoRiderId)
-                  go("signin")
-                }}
-                toast={toast}
-              />
-            )}
-            {shown === "places" && rider && <SavedPlacesScreen rider={rider} busy={busy} onSave={(savedPlaces) => run(() => api.updateRider(rider.id, { savedPlaces }), () => toast(t("common.saved")))} />}
-            {shown === "contacts" && rider && <EmergencyContactsScreen rider={rider} busy={busy} onSave={(emergencyContacts) => run(() => api.updateRider(rider.id, { emergencyContacts }), () => toast(t("common.saved")))} toast={toast} />}
-            {shown === "signin" && <SignInScreen busy={busy} onSubmit={(input) => void signIn(input)} toast={toast} />}
-          </>
+          animated
         )}
 
         {cancelling && current && <CancelSheet busy={busy} onConfirm={cancelCurrent} onClose={() => setCancelling(false)} />}

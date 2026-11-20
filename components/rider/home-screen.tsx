@@ -2,7 +2,6 @@
 
 import { ArrowRight, CarFront, Home, MapPin, Plus } from "lucide-react"
 import { EmptyState } from "@/components/shared/empty-state"
-import { MapView } from "@/components/shared/map-view"
 import { Skeleton } from "@/components/shared/skeleton"
 import { TripCard } from "@/components/shared/trip-card"
 import { useT } from "@/lib/i18n"
@@ -13,7 +12,8 @@ import type { PlaceId, Rider, Trip } from "@/lib/types"
 const greetings = { morning: "rider.home.goodMorning", afternoon: "rider.home.goodAfternoon", evening: "rider.home.goodEvening" } as const
 
 export function HomeScreen(props: {
-  rider: Rider
+  /** Missing when the rider has not signed in yet (map first). */
+  rider?: Rider
   recentTrips?: Trip[]
   activeTrip?: Trip
   onBook: () => void
@@ -26,22 +26,21 @@ export function HomeScreen(props: {
   const t = useT()
   const { rider, recentTrips, activeTrip } = props
   return (
-    <div className="animate-in fade-in duration-200">
-      <div className="px-5 pb-5 pt-6">
-        <p className="text-sm text-muted-foreground">{t(greetings[partOfDay(kigaliHour())])}</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">{t("rider.home.whereTo", { name: rider.name.split(" ")[0] })}</h1>
+    <div className="pb-4">
+      <div className="px-5 pb-3 pt-1">
+        <p className="text-sm text-muted-foreground">
+          {t(greetings[partOfDay(kigaliHour())])}
+          {rider ? `, ${rider.name.split(" ")[0]}` : ""}
+        </p>
       </div>
       <div className="px-4">
-        <button onClick={props.onBook} className="flex min-h-16 w-full items-center gap-3 rounded-2xl border bg-card px-4 text-left shadow-sm">
+        <button onClick={props.onBook} className="flex min-h-16 w-full items-center gap-3 rounded-2xl bg-secondary px-4 text-left transition active:scale-[0.99]">
           <span className="grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground">
             <MapPin className="size-5" />
           </span>
-          <span className="flex-1 font-medium">{t("rider.home.whereGoing")}</span>
+          <span className="flex-1 text-lg font-semibold">{t("rider.home.whereGoing")}</span>
           <ArrowRight className="size-5 text-muted-foreground" />
         </button>
-      </div>
-      <div className="px-4 pt-4">
-        <MapView />
       </div>
       {activeTrip && (
         <button onClick={props.onOpenActive} className="mx-4 mt-4 flex w-[calc(100%-32px)] items-center gap-3 rounded-2xl bg-primary p-4 text-left text-primary-foreground">
@@ -55,7 +54,10 @@ export function HomeScreen(props: {
           <ArrowRight className="size-5" />
         </button>
       )}
-      <section className="px-5 pt-7">
+      {!rider && <p className="px-5 pt-4 text-sm text-muted-foreground">{t("rider.home.signedOutNote")}</p>}
+      {rider && (
+      <>
+      <section className="px-5 pt-6">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{t("rider.home.savedPlaces")}</h2>
           <button onClick={props.onAddPlace} className="grid size-9 place-items-center rounded-full hover:bg-secondary" aria-label={t("rider.home.addSavedPlace")}>
@@ -79,7 +81,7 @@ export function HomeScreen(props: {
           ))}
         </div>
       </section>
-      <section className="px-5 pb-5 pt-7">
+      <section className="px-5 pt-6">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{t("rider.home.recentTrips")}</h2>
           <button onClick={props.onSeeAll} className="text-sm font-semibold text-primary">
@@ -101,6 +103,8 @@ export function HomeScreen(props: {
           <EmptyState title={t("rider.home.emptyTitle")} detail={t("rider.home.emptyDetail")} action={{ label: t("rider.home.bookRide"), onClick: props.onBook }} />
         )}
       </section>
+      </>
+      )}
     </div>
   )
 }

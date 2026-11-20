@@ -4,11 +4,15 @@ import { FileText, Home, UserRound, Wallet, WifiOff } from "lucide-react"
 import Link from "next/link"
 import { useEffect, useState } from "react"
 import { Logo } from "@/components/shared/logo"
+import { MapSheet } from "@/components/shared/map-sheet"
+import { MapView } from "@/components/shared/map-view"
+import { NotificationBell } from "@/components/shared/notification-center"
 import { Skeleton } from "@/components/shared/skeleton"
 import { Toast, useToastMessage } from "@/components/shared/toast"
 import * as api from "@/lib/api"
 import { driverEarnings } from "@/lib/driver"
 import { useT } from "@/lib/i18n"
+import { carPosition, placeLngLat } from "@/lib/map"
 import type { Trip } from "@/lib/types"
 import { useLive, useOnline } from "@/lib/use-live"
 import { useNow } from "@/lib/use-now"
@@ -16,7 +20,7 @@ import { useStored } from "@/lib/use-stored"
 import { AfterTripScreen } from "./after-screen"
 import { DocumentsScreen } from "./documents-screen"
 import { EarningsScreen } from "./earnings-screen"
-import { DriverHome } from "./home-screen"
+import { DriverHome, PresenceButton } from "./home-screen"
 import { OfferScreen } from "./offer-screen"
 import { DriverProfileScreen } from "./profile-screen"
 import { DriverSignIn } from "./sign-in-screen"
@@ -39,6 +43,7 @@ export default function DriverApp() {
   const [tab, setTab] = useState<Tab>("home")
   const [afterTripId, setAfterTripId] = useState<string>()
   const [busy, setBusy] = useState(false)
+  const [sheetHeight, setSheetHeight] = useState(0)
 
   const me = useLive(() => (driverId ? api.getDrivers().then((rows) => rows.find((row) => row.id === driverId)) : Promise.resolve(undefined)), ["drivers"], [driverId])
   const trips = useLive(() => (driverId ? api.getDriverTrips(driverId) : Promise.resolve([])), ["trips"], [driverId])
@@ -76,9 +81,9 @@ export default function DriverApp() {
     }
   }
 
-  async function signIn(phone: string) {
+  async function signIn(phone: string, code: string) {
     await run(async () => {
-      const signedIn = await api.signInDriver({ phone })
+      const signedIn = await api.signInDriver({ phone, code })
       setDriverId(signedIn.id)
       setTab("home")
     })
@@ -94,13 +99,16 @@ export default function DriverApp() {
   const showAfter = !showOffer && !showTrip && afterTripId && current?.trip.id === afterTripId
 
   return (
-    <main className="min-h-screen bg-secondary/45 pb-24 text-foreground">
+    <main className={`min-h-screen bg-secondary/45 text-foreground ${tab === "home" && !showTrip && !showAfter ? "" : "pb-24"}`}>
       <div className="mx-auto min-h-screen w-full max-w-[430px] border-x bg-background shadow-sm">
         <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b bg-background/95 px-5 backdrop-blur">
           <Link href="/" aria-label={t("common.homeLink")}>
             <Logo small />
           </Link>
-          <span className="text-sm font-semibold text-muted-foreground">{t("driver.appName")}</span>
+          <span className="flex items-center gap-1">
+            {driverId && driver && <NotificationBell viewer={{ kind: "driver", id: driverId }} />}
+            <span className="text-sm font-semibold text-muted-foreground">{t("driver.appName")}</span>
+          </span>
         </header>
         {!online && (
           <div role="status" className="flex items-center gap-2 bg-destructive/10 px-5 py-2 text-sm text-destructive">
@@ -109,7 +117,7 @@ export default function DriverApp() {
         )}
 
         {signedOut ? (
-          <DriverSignIn busy={busy} onSubmit={(phone) => void signIn(phone)} toast={toast} />
+          <DriverSignIn busy={busy} onSubmit={(phone, code) => void signIn(phone, code)} toast={toast} />
         ) : !driver ? (
           <div className="flex flex-col gap-3 px-5 pt-6" aria-busy>
             <Skeleton className="h-24" />
@@ -120,7 +128,8 @@ export default function DriverApp() {
             job={current!}
             busy={busy}
             onArrived={() => void run(() => api.driverArrived(liveTrip!.id))}
-            onStart={() => void run(() => api.startTrip(liveTrip!.id))}
+            onStart={(pin) => void run(() => api.startTrip(liveTrip!.id, pin))}
+            toast={toast}
             onEnd={() => void run(() => api.endTrip(liveTrip!.id), () => setAfterTripId(liveTrip!.id))}
             onSos={() =>
               run(
@@ -143,28 +152,30 @@ export default function DriverApp() {
         ) : (
           <>
             {tab === "home" && (
-              <DriverHome
-                driver={driver}
-                firm={firm}
-                earnings={earnings}
-                toConfirm={toConfirm}
-                busy={busy}
-                onToggle={(next) => void run(() => api.setDriverPresence(driver.id, next ? "online" : "offline"), () => toast(next ? t("driver.home.nowOnline") : t("driver.home.nowOffline")))}
-                onDocuments={() => setTab("documents")}
-                onOpenTrip={openTrip}
-              />
+              // Map first: the driver's car on the map, a big Go online button over it, and the day in a sheet.
+              <div className="relative h-[calc(100dvh-8.75rem)] overflow-hidden">
+                <MapView full cars={[{ key: driver.id, position: carPosition(driver.id, driver.zone, Math.floor(now / 3000) * 3000), state: driver.status === "on_trip" ? "on_trip" : "free" }]} center={placeLngLat(driver.zone)} padding={{ bottom: sheetHeight, top: 96 }} label={t("driver.map.label")} />
+                <div className="absolute inset-x-3 top-3 z-[5]">
+                  <PresenceButton driver={driver} busy={busy} onToggle={(next) => void run(() => api.setDriverPresence(driver.id, next ? "online" : "offline"), () => toast(next ? t("driver.home.nowOnline") : t("driver.home.nowOffline")))} />
+                </div>
+                <MapSheet label={t("driver.nav.home")} maxShare={0.6} onHeight={setSheetHeight}>
+                  <DriverHome driver={driver} firm={firm} earnings={earnings} toConfirm={toConfirm} onDocuments={() => setTab("documents")} onOpenTrip={openTrip} />
+                </MapSheet>
+              </div>
             )}
             {tab === "earnings" && <EarningsScreen earnings={earnings} trips={trips.data ?? []} onOpen={openTrip} />}
-            {tab === "documents" && <DocumentsScreen driver={driver} car={car} busy={busy} onSubmit={(type, expiry) => run(() => api.submitDocument(driver.id, type, expiry), () => toast(t("driver.docs.sent")))} />}
+            {tab === "documents" && <DocumentsScreen driver={driver} car={car} busy={busy} onSubmit={(type, expiry, file) => run(() => api.submitDocument(driver.id, type, expiry, file), () => toast(t("driver.docs.sent")))} />}
             {tab === "profile" && (
               <DriverProfileScreen
                 driver={driver}
                 car={car}
                 firm={firm}
+                toast={toast}
                 onSignOut={() =>
                   void run(async () => {
                     if (driver.status === "online") await api.setDriverPresence(driver.id, "offline")
                     setDriverId("")
+                    await api.signOut()
                   })
                 }
               />

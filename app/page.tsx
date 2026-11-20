@@ -4,7 +4,7 @@ import Link from "next/link"
 import { ArrowUpRight, BadgeCheck, CarFront, ChartNoAxesCombined, Clock3, MapPin, ShieldCheck, Smartphone, Users } from "lucide-react"
 import { Logo } from "@/components/shared/logo"
 import { ThemeToggle } from "@/components/shared/theme"
-import { supportEmail } from "@/lib/config"
+import { contactEmail } from "@/lib/config"
 import { useT, type TranslationKey } from "@/lib/i18n"
 
 const demos: { title: TranslationKey; description: TranslationKey; href: string; icon: typeof MapPin; tint: string }[] = [
@@ -25,7 +25,7 @@ export default function Page() {
         </span>
         <span className="flex items-center gap-1">
           <ThemeToggle />
-          <a href={`mailto:${supportEmail}`} className="inline-flex min-h-11 items-center text-sm font-semibold">
+          <a href={`mailto:${contactEmail}`} className="inline-flex min-h-11 items-center text-sm font-semibold">
             {t("start.contact")} <ArrowUpRight className="ml-1 inline size-4" />
           </a>
         </span>

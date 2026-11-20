@@ -18,5 +18,5 @@ export default defineConfig([
     files: ["lib/**", "tests/**", "supabase/**", "scripts/**"],
     rules: { "no-restricted-imports": "off" },
   },
-  globalIgnores([".next/**", "out/**", "build/**", "next-env.d.ts", "lib/database.types.ts"]),
+  globalIgnores([".next/**", "out/**", "build/**", "next-env.d.ts", "lib/database.types.ts", "public/vendor/**"]),
 ])

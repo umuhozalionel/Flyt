@@ -38,6 +38,17 @@ export function DocumentList({ documents, owner, ownerId }: { documents: Complia
     }
   }
 
+  // The link is signed and works for 60 seconds only.
+  async function openFile(type: DocumentType) {
+    try {
+      const url = await api.getDocumentFileUrl(owner, ownerId, type)
+      if (url) window.open(url, "_blank", "noopener,noreferrer")
+      else toast(t("ops.docs.noFile"))
+    } catch (caught) {
+      toast(errorText(caught, t("ops.actionFailed")))
+    }
+  }
+
   return (
     <>
       <ul className="divide-y text-sm">
@@ -54,6 +65,11 @@ export function DocumentList({ documents, owner, ownerId }: { documents: Complia
                 </span>
                 <DocumentBadge status={status} />
               </div>
+              {doc.hasFile && (
+                <button type="button" className="mt-1 text-xs font-medium text-primary hover:underline" onClick={() => void openFile(doc.type)}>
+                  {t("ops.docs.viewFile")}
+                </button>
+              )}
               {status === "rejected" && doc.rejectReason && <p className="mt-1 text-xs text-destructive">{t("ops.docs.rejectedBecause", { reason: doc.rejectReason })}</p>}
               {status === "pending_review" &&
                 (isPlatform ? (

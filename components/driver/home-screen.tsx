@@ -5,37 +5,60 @@ import { Badge } from "@/components/ui/badge"
 import { documentStatus } from "@/lib/documents"
 import type { DriverEarnings } from "@/lib/driver"
 import { formatMoney } from "@/lib/format"
+import { haptic } from "@/lib/haptics"
 import { useT, type TranslationKey } from "@/lib/i18n"
 import { placeName } from "@/lib/places"
 import type { Driver, Firm, Trip } from "@/lib/types"
+import { DriverHomeExtras } from "./home-extras"
 
-export function DriverHome(props: { driver: Driver; firm?: Firm; earnings: DriverEarnings; toConfirm: Trip[]; busy: boolean; onToggle: (online: boolean) => void; onDocuments: () => void; onOpenTrip: (trip: Trip) => void }) {
+/** Why a driver cannot go online, if they cannot. */
+function blockedReason(driver: Driver, t: ReturnType<typeof useT>) {
+  const docs = driver.documents.map((doc) => documentStatus(doc))
+  if (driver.approval !== "approved") return t(`driver.home.blocked.${driver.approval}` as TranslationKey)
+  if (docs.some((status) => status === "expired" || status === "missing" || status === "rejected")) return t("driver.home.blocked.documents")
+  return undefined
+}
+
+/** The big "Go online" button over the map. */
+export function PresenceButton({ driver, busy, onToggle }: { driver: Driver; busy: boolean; onToggle: (online: boolean) => void }) {
+  const t = useT()
+  const online = driver.status !== "offline"
+  const blocked = blockedReason(driver, t)
+  return (
+    <button
+      role="switch"
+      aria-checked={online}
+      disabled={busy || driver.status === "on_trip" || (!online && !!blocked)}
+      onClick={() => {
+        haptic(online ? "light" : "success")
+        onToggle(!online)
+      }}
+      className={`flex min-h-20 w-full items-center justify-between gap-4 rounded-[28px] px-6 text-left text-xl font-semibold shadow-xl transition active:scale-[0.98] disabled:opacity-70 ${online ? "bg-primary text-primary-foreground" : "bg-background"}`}
+    >
+      <span>
+        {driver.status === "on_trip" ? t("driver.home.onTrip") : online ? t("driver.home.online") : t("driver.map.goOnline")}
+        <span className="block text-sm font-normal opacity-80">{online ? t("driver.home.tapOffline") : t("driver.home.tapOnline")}</span>
+      </span>
+      <span className={`relative h-9 w-16 shrink-0 rounded-full ${online ? "bg-primary-foreground/30" : "bg-secondary"}`}>
+        <span className={`absolute top-1 size-7 rounded-full shadow transition-all ${online ? "left-8 bg-primary-foreground" : "left-1 bg-foreground/60"}`} />
+      </span>
+    </button>
+  )
+}
+
+export function DriverHome(props: { driver: Driver; firm?: Firm; earnings: DriverEarnings; toConfirm: Trip[]; onDocuments: () => void; onOpenTrip: (trip: Trip) => void }) {
   const t = useT()
   const { driver } = props
   const online = driver.status !== "offline"
   const docs = driver.documents.map((doc) => ({ doc, status: documentStatus(doc) })).filter((row) => row.status !== "valid")
-  const blocked = driver.approval !== "approved" ? t(`driver.home.blocked.${driver.approval}` as TranslationKey) : docs.some((row) => row.status === "expired" || row.status === "missing" || row.status === "rejected") ? t("driver.home.blocked.documents") : undefined
+  const blocked = blockedReason(driver, t)
 
   return (
-    <div className="px-5 pb-8 pt-6">
+    <div className="px-5 pb-6 pt-1">
       <p className="text-sm text-muted-foreground">{props.firm ? t("driver.home.drivingFor", { firm: props.firm.name }) : ""}</p>
       <h1 className="mt-1 text-2xl font-semibold">{t("driver.home.hello", { name: driver.name.split(" ")[0] })}</h1>
+      <div className="mt-3" />
 
-      <button
-        role="switch"
-        aria-checked={online}
-        disabled={props.busy || driver.status === "on_trip" || (!online && !!blocked)}
-        onClick={() => props.onToggle(!online)}
-        className={`mt-5 flex min-h-24 w-full items-center justify-between rounded-3xl px-6 text-left text-xl font-semibold transition disabled:opacity-60 ${online ? "bg-primary text-primary-foreground" : "border-2 bg-card"}`}
-      >
-        <span>
-          {driver.status === "on_trip" ? t("driver.home.onTrip") : online ? t("driver.home.online") : t("driver.home.offline")}
-          <span className="block text-sm font-normal opacity-80">{online ? t("driver.home.tapOffline") : t("driver.home.tapOnline")}</span>
-        </span>
-        <span className={`relative h-9 w-16 rounded-full ${online ? "bg-primary-foreground/30" : "bg-secondary"}`}>
-          <span className={`absolute top-1 size-7 rounded-full shadow transition-all ${online ? "left-8 bg-primary-foreground" : "left-1 bg-foreground/60"}`} />
-        </span>
-      </button>
       {blocked && !online && (
         <p role="alert" className="mt-3 flex items-start gap-2 rounded-xl bg-destructive/10 p-3 text-sm text-destructive">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" /> {blocked}
@@ -59,6 +82,7 @@ export function DriverHome(props: { driver: Driver; firm?: Firm; earnings: Drive
         </div>
       </div>
       <p className="mt-2 text-xs text-muted-foreground">{t("driver.home.zone", { zone: placeName(driver.zone) })}</p>
+      <DriverHomeExtras driver={driver} />
 
       {props.toConfirm.length > 0 && (
         <section className="mt-5">

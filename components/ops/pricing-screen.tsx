@@ -12,10 +12,11 @@ import { formatMoney } from "@/lib/format"
 import { useT } from "@/lib/i18n"
 import { distanceBetween, placeName, places } from "@/lib/places"
 import { activePlan, distanceFare, fareSplit, sharedSeatFare } from "@/lib/pricing"
-import type { AirportZone, PlatformFeePercent, PricingConfig, PricingPlan } from "@/lib/types"
+import type { AirportZone, Firm, PlatformFeePercent, PricingConfig, PricingPlan } from "@/lib/types"
 import { errorText, useOps } from "./ops-context"
 import { useOpsData } from "./ops-data"
-import { Card, LoadError, Loading, PageHeader, PlatformOnly } from "./ops-ui"
+import { Card, LoadError, Loading, PageHeader } from "./ops-ui"
+import { TipsSwitch } from "./additions-settings"
 
 function useRun() {
   const t = useT()
@@ -41,9 +42,10 @@ export function PricingScreen() {
   const t = useT()
   const { isPlatform } = useOps()
   const { data, error } = useOpsData()
-  if (!isPlatform) return <PlatformOnly />
   if (error && !data) return <LoadError error={error} />
   if (!data) return <Loading />
+  // Firm admins see their own firm only: the fee Flyt charges (read-only) and their own hire rates.
+  if (!isPlatform) return <FirmPricing firm={data.firms[0]} />
   const pricing = data.pricing
   return (
     <>
@@ -239,5 +241,53 @@ function AirportZones({ pricing }: { pricing: PricingConfig }) {
         </div>
       </form>
     </Card>
+  )
+}
+
+function FirmPricing({ firm }: { firm?: Firm }) {
+  const t = useT()
+  const { busy, run } = useRun()
+  const [values, setValues] = useState({ hourlyRate: firm?.hourlyRate != null ? String(firm.hourlyRate) : "", dailyRate: firm?.dailyRate != null ? String(firm.dailyRate) : "" })
+  if (!firm) return <PageHeader title={t("ops.pricing.title")} detail={t("ops.pricing.noFirm")} />
+  const asRate = (value: string) => (value.trim() ? Number(value) : undefined)
+  const changed = asRate(values.hourlyRate) !== firm.hourlyRate || asRate(values.dailyRate) !== firm.dailyRate
+  const set = (key: keyof typeof values) => (event: { target: { value: string } }) => setValues((current) => ({ ...current, [key]: event.target.value }))
+  const example = fareSplit(10000, firm.feePercent)
+  return (
+    <>
+      <PageHeader title={t("ops.pricing.title")} detail={t("ops.pricing.firmDetail", { name: firm.name })} />
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card title={t("ops.pricing.firmFee")}>
+          <p className="text-3xl font-semibold tabular-nums">{firm.feePercent}%</p>
+          <p className="mt-2 text-sm text-muted-foreground">{t("ops.pricing.firmFeeDetail", { fare: formatMoney(example.fare), fee: formatMoney(example.platformFee), keeps: formatMoney(example.firmKeeps) })}</p>
+          <p className="mt-2 text-xs text-muted-foreground">{t("ops.pricing.firmFeeReadOnly")}</p>
+        </Card>
+        <Card title={t("ops.pricing.rates")}>
+          <form
+            className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void run(() => api.setFirmRates(firm.id, { hourlyRate: asRate(values.hourlyRate), dailyRate: asRate(values.dailyRate) }), t("ops.pricing.ratesSaved"))
+            }}
+          >
+            <Field id="firm-hourly" label={t("ops.pricing.hourlyRate")}>
+              <Input id="firm-hourly" type="number" min={1} step={1} inputMode="numeric" placeholder={t("ops.pricing.notOffered")} value={values.hourlyRate} onChange={set("hourlyRate")} />
+            </Field>
+            <Field id="firm-daily" label={t("ops.pricing.dailyRate")}>
+              <Input id="firm-daily" type="number" min={1} step={1} inputMode="numeric" placeholder={t("ops.pricing.notOffered")} value={values.dailyRate} onChange={set("dailyRate")} />
+            </Field>
+            <p className="text-xs text-muted-foreground sm:col-span-2">{t("ops.pricing.ratesDetail")}</p>
+            <div className="flex justify-end sm:col-span-2">
+              <Button type="submit" className="min-h-10" disabled={busy || !changed}>
+                {busy ? t("common.saving") : t("ops.pricing.saveRates")}
+              </Button>
+            </div>
+          </form>
+        </Card>
+        <div className="lg:col-span-2">
+          <TipsSwitch firm={firm} />
+        </div>
+      </div>
+    </>
   )
 }
